@@ -180,7 +180,8 @@ function getSelectedCountries() {
     const checked = document.querySelector('#country-dropdown input[name=country]:checked');
     return checked ? [checked.value] : [];
 }
-function todayStr()  { return new Date().toISOString().split('T')[0]; }
+function todayStr()     { return new Date().toISOString().split('T')[0]; }
+function yesterdayStr() { const d = new Date(); d.setDate(d.getDate()-1); return d.toISOString().split('T')[0]; }
 function isDark()    { return document.documentElement.classList.contains('dark'); }
 
 // ── Country overlay ──────────────────────────────────────────────
@@ -211,8 +212,8 @@ document.querySelector('#country-dropdown input[value="united_states"]').checked
 updateCountryBtnLabel();
 
 // ── Defaults ─────────────────────────────────────────────────────
-startDateInput.value = todayStr();
-endDateInput.value   = todayStr();
+startDateInput.value = yesterdayStr();
+endDateInput.value   = yesterdayStr();
 
 function setTenorDefaults() {
     if(modeSelect.value === 'country'){
