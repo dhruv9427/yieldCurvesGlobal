@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Global Yield Curve Dashboard</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    darkMode: 'class',
+    theme: {
+      extend: {
+        colors: {
+          navy: { 950: '#07111f', 900: '#0d1b2e', 800: '#112240', 700: '#1a3358', 600: '#1e3a5f' }
+        }
+      }
+    }
+  }
+</script>
+<script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+<style>
+  /* Theme toggle */
+  #toggle-thumb { transition: transform 0.25s ease; }
+  html.dark #toggle-thumb { transform: translateX(1.5rem); }
+  html.dark #toggle-track { background-color: #3b82f6; }
+
+  /* Shared pill style (tenor + country) */
+  .pill-cb input[type=checkbox], .pill-cb input[type=radio] { display: none; }
+  .pill-cb span {
+    display: inline-block; padding: 4px 10px; border-radius: 9999px; font-size: 0.75rem;
+    font-weight: 600; cursor: pointer; border: 1.5px solid #d1d5db;
+    color: #6b7280; background: white; transition: all 0.15s;
+    user-select: none;
+  }
+  .pill-cb input:checked + span { background: #2563eb; color: white; border-color: #2563eb; }
+  html.dark .pill-cb span { border-color: #1e3a5f; color: #94a3b8; background: #0d1b2e; }
+  html.dark .pill-cb input:checked + span { background: #3b82f6; color: white; border-color: #3b82f6; }
+
+  /* Date picker dark mode */
+  html.dark input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(0.7); }
+
+  /* Table striping */
+  #yield-table tbody tr:nth-child(even) { background-color: #f9fafb; }
+  html.dark #yield-table tbody tr:nth-child(even) { background-color: #0a1628; }
+  #yield-table tbody tr:hover { background-color: #eff6ff; }
+  html.dark #yield-table tbody tr:hover { background-color: #1a3358; }
+</style>
+</head>
+<body class="bg-gray-100 dark:bg-navy-900 text-gray-900 dark:text-slate-100 min-h-screen transition-colors duration-300">
+
+<div class="max-w-7xl mx-auto px-4 sm:px-6 py-6">
+
+  <!-- Header -->
+  <div class="flex items-center justify-between mb-6">
+    <div>
+      <h1 class="text-2xl font-bold tracking-tight text-gray-900 dark:text-white">Global Yield Curve Dashboard</h1>
+      <p class="text-sm text-gray-500 dark:text-slate-400 mt-0.5">Sovereign bond yields across maturities</p>
+    </div>
+    <div class="flex items-center gap-2.5">
+      <span class="text-xs font-medium text-gray-400 dark:text-slate-500">Light</span>
+      <button id="toggle-theme" aria-label="Toggle theme" class="relative w-12 h-6 focus:outline-none">
+        <div id="toggle-track" class="w-12 h-6 rounded-full bg-gray-300 transition-colors duration-300"></div>
+        <div id="toggle-thumb" class="absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow-md"></div>
+      </button>
+      <span class="text-xs font-medium text-gray-400 dark:text-slate-500">Dark</span>
+    </div>
+  </div>
+
+  <!-- Controls card -->
+  <div class="bg-white dark:bg-navy-800 rounded-2xl shadow-sm border border-gray-200 dark:border-navy-600 p-5 mb-5">
+    <div class="flex flex-wrap gap-5 items-end">
+
+      <!-- Mode -->
+      <div class="flex flex-col gap-1.5">
+        <label class="text-xs font-semibold text-gray-400 dark:text-slate-500 uppercase tracking-wider">Mode</label>
+        <select id="mode" class="px-3 py-2 rounded-lg border border-gray-200 dark:border-navy-600 bg-gray-50 dark:bg-navy-900 text-gray-900 dark:text-slate-100 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer">
+          <option value="country">Country</option>
+          <option value="tenor">Tenor</option>
+        </select>
+      </div>
+
+      <!-- Country multi-select overlay -->
+      <div class="flex flex-col gap-1.5 relative" id="country-wrapper">
+        <label class="text-xs font-semibold text-gray-400 dark:text-slate-500 uppercase tracking-wider">Countries</label>
+        <button id="country-btn" type="button"
+          class="flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-200 dark:border-navy-600 bg-gray-50 dark:bg-navy-900 text-gray-900 dark:text-slate-100 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 min-w-[130px] justify-between">
+          <span id="country-btn-label">US</span>
+          <svg class="w-3.5 h-3.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+          </svg>
+        </button>
+        <!-- Dropdown overlay -->
+        <div id="country-dropdown"
+          class="absolute top-full left-0 mt-1.5 z-50 hidden bg-white dark:bg-navy-800 border border-gray-200 dark:border-navy-600 rounded-xl shadow-xl p-3 min-w-[160px]">
+          <div class="flex flex-col gap-2">
+            <label class="pill-cb"><input type="radio" name="country" value="united_states"><span class="w-full">🇺🇸 US</span></label>
+            <label class="pill-cb"><input type="radio" name="country" value="united_kingdom"><span class="w-full">🇬🇧 UK</span></label>
+            <label class="pill-cb"><input type="radio" name="country" value="germany"><span class="w-full">🇩🇪 GER</span></label>
+            <label class="pill-cb"><input type="radio" name="country" value="france"><span class="w-full">🇫🇷 FRA</span></label>
+          </div>
+        </div>
+      </div>
+
+      <!-- From -->
+      <div class="flex flex-col gap-1.5">
+        <label class="text-xs font-semibold text-gray-400 dark:text-slate-500 uppercase tracking-wider">From</label>
+        <input type="date" id="start_date" class="px-3 py-2 rounded-lg border border-gray-200 dark:border-navy-600 bg-gray-50 dark:bg-navy-900 text-gray-900 dark:text-slate-100 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+      </div>
+
+      <!-- To -->
+      <div class="flex flex-col gap-1.5">
+        <label class="text-xs font-semibold text-gray-400 dark:text-slate-500 uppercase tracking-wider">To</label>
+        <input type="date" id="end_date" class="px-3 py-2 rounded-lg border border-gray-200 dark:border-navy-600 bg-gray-50 dark:bg-navy-900 text-gray-900 dark:text-slate-100 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+      </div>
+
+      <!-- Tenors -->
+      <div class="flex flex-col gap-1.5">
+        <label class="text-xs font-semibold text-gray-400 dark:text-slate-500 uppercase tracking-wider">Tenors</label>
+        <div id="tenor-checkboxes" class="flex flex-wrap gap-1.5">
+          <label class="pill-cb"><input type="checkbox" value="1M"><span>1M</span></label>
+          <label class="pill-cb"><input type="checkbox" value="3M"><span>3M</span></label>
+          <label class="pill-cb"><input type="checkbox" value="6M"><span>6M</span></label>
+          <label class="pill-cb"><input type="checkbox" value="1Y"><span>1Y</span></label>
+          <label class="pill-cb"><input type="checkbox" value="2Y"><span>2Y</span></label>
+          <label class="pill-cb"><input type="checkbox" value="5Y"><span>5Y</span></label>
+          <label class="pill-cb"><input type="checkbox" value="10Y"><span>10Y</span></label>
+          <label class="pill-cb"><input type="checkbox" value="30Y"><span>30Y</span></label>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Error -->
+  <div id="error-msg" class="hidden mb-4 px-4 py-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 text-sm"></div>
+
+  <!-- Chart -->
+  <div class="bg-white dark:bg-navy-800 rounded-2xl shadow-sm border border-gray-200 dark:border-navy-600 p-4 mb-5">
+    <div id="chart" style="height:460px;"></div>
+  </div>
+
+  <!-- Table -->
+  <p id="table-note" class="hidden text-xs text-gray-400 dark:text-slate-500 mb-1 text-right"></p>
+  <div class="bg-white dark:bg-navy-800 rounded-2xl shadow-sm border border-gray-200 dark:border-navy-600 overflow-hidden">
+    <table id="yield-table" class="w-full text-sm">
+      <thead>
+        <tr class="bg-gray-50 dark:bg-navy-900 border-b border-gray-200 dark:border-navy-600">
+          <th class="px-5 py-3 text-left text-xs font-semibold text-gray-500 dark:text-slate-400 uppercase tracking-wider">Date</th>
+          <th class="px-5 py-3 text-left text-xs font-semibold text-gray-500 dark:text-slate-400 uppercase tracking-wider">Country</th>
+          <th class="px-5 py-3 text-left text-xs font-semibold text-gray-500 dark:text-slate-400 uppercase tracking-wider">Tenor</th>
+          <th class="px-5 py-3 text-right text-xs font-semibold text-gray-500 dark:text-slate-400 uppercase tracking-wider">Yield (%)</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-gray-100 dark:divide-navy-700"></tbody>
+    </table>
+  </div>
+
+</div>
+
+<script>
+const API_BASE = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+    ? 'http://localhost:8000'
+    : '';
+const COUNTRY_LABELS = {united_states:'US', united_kingdom:'UK', france:'FRA', germany:'GER'};
+function countryLabel(c){ return COUNTRY_LABELS[c] || c; }
+
+const modeSelect       = document.getElementById('mode');
+const startDateInput   = document.getElementById('start_date');
+const endDateInput     = document.getElementById('end_date');
+const tenorCheckboxes  = document.querySelectorAll('#tenor-checkboxes input[type=checkbox]');
+const countryCheckboxes = document.querySelectorAll('#country-dropdown input[name=country]');
+
+const chartDiv         = document.getElementById('chart');
+const tableBody        = document.querySelector('#yield-table tbody');
+
+let lastChart = null; // { data, mode, selectedCountries }
+
+function getSelectedTenors()    { return Array.from(tenorCheckboxes).filter(cb => cb.checked).map(cb => cb.value); }
+function getSelectedCountries() {
+    const checked = document.querySelector('#country-dropdown input[name=country]:checked');
+    return checked ? [checked.value] : [];
+}
+function todayStr()  { return new Date().toISOString().split('T')[0]; }
+function isDark()    { return document.documentElement.classList.contains('dark'); }
+
+// ── Country overlay ──────────────────────────────────────────────
+const countryBtn      = document.getElementById('country-btn');
+const countryDropdown = document.getElementById('country-dropdown');
+const countryBtnLabel = document.getElementById('country-btn-label');
+
+countryBtn.addEventListener('click', e => {
+    e.stopPropagation();
+    countryDropdown.classList.toggle('hidden');
+});
+document.addEventListener('click', e => {
+    if(!e.target.closest('#country-wrapper')) countryDropdown.classList.add('hidden');
+});
+
+function updateCountryBtnLabel() {
+    const sel = getSelectedCountries();
+    countryBtnLabel.textContent = sel.length === 0 ? 'None'
+        : sel.map(countryLabel).join(', ');
+}
+
+countryCheckboxes.forEach(cb => {
+    cb.addEventListener('change', () => { updateCountryBtnLabel(); fetchData(); });
+});
+
+// Default: US selected
+document.querySelector('#country-dropdown input[value="united_states"]').checked = true;
+updateCountryBtnLabel();
+
+// ── Defaults ─────────────────────────────────────────────────────
+startDateInput.value = todayStr();
+endDateInput.value   = todayStr();
+
+function setTenorDefaults() {
+    if(modeSelect.value === 'country'){
+        tenorCheckboxes.forEach(cb => cb.checked = true);
+    } else {
+        tenorCheckboxes.forEach(cb => cb.checked = (cb.value === '10Y'));
+    }
+}
+setTenorDefaults();
+modeSelect.addEventListener('change', () => { setTenorDefaults(); fetchData(); });
+
+// ── Fetch ─────────────────────────────────────────────────────────
+async function fetchData() {
+    const mode     = modeSelect.value;
+    const start    = startDateInput.value;
+    const end      = endDateInput.value;
+    const selected = getSelectedCountries();
+
+    if(!selected.length) {
+        clearError();
+        Plotly.purge(chartDiv);
+        tableBody.innerHTML = '';
+        return;
+    }
+
+    try {
+        const sc = selected.join(',');
+        let url = `${API_BASE}/yield-curve/all?selected_countries=${sc}`;
+        if(mode === 'country'){
+            url += `&start=${start||todayStr()}&end=${end||todayStr()}&view=country`;
+        } else {
+            const s = start || new Date(Date.now()-7*24*60*60*1000).toISOString().split('T')[0];
+            url += `&start=${s}&end=${end||todayStr()}`;
+        }
+
+        const raw = await fetch(url).then(r => { if(!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); });
+        if(raw.error) { showError(raw.error); return; }
+
+        // Normalise: tenor mode single-country returns plain object — wrap it
+        const data = (mode === 'tenor' && !Array.isArray(raw))
+            ? [{ country: selected[0], data: raw }]
+            : raw;
+
+        clearError();
+        lastChart = { data, mode, selectedCountries: selected };
+        updateChart(data, mode, selected);
+        updateTable(data, mode);
+    } catch(err) {
+        showError(`Failed to fetch: ${err.message}. Is the server running? (uvicorn main:app)`);
+    }
+}
+
+// ── Error helpers ─────────────────────────────────────────────────
+function showError(msg) {
+    const el = document.getElementById('error-msg');
+    el.textContent = msg; el.classList.remove('hidden');
+}
+function clearError() {
+    document.getElementById('error-msg').classList.add('hidden');
+}
+
+// ── Plotly theme ──────────────────────────────────────────────────
+function plotlyTheme() {
+    const dark = isDark();
+    return {
+        plot_bgcolor:  dark ? '#112240' : '#ffffff',
+        paper_bgcolor: dark ? '#112240' : '#ffffff',
+        font:      { color: dark ? '#cbd5e1' : '#374151' },
+        gridcolor: dark ? '#1a3358' : '#e5e7eb',
+        linecolor: dark ? '#1e3a5f' : '#d1d5db',
+    };
+}
+
+// ── Chart ─────────────────────────────────────────────────────────
+function updateChart(data, mode, selectedCountries) {
+    const selectedTenors = getSelectedTenors();
+    const t = plotlyTheme();
+    const layout = {
+        plot_bgcolor: t.plot_bgcolor, paper_bgcolor: t.paper_bgcolor, font: t.font,
+        margin: { t:20, r:20, b:50, l:55 },
+        legend: { bgcolor: 'rgba(0,0,0,0)', font: { color: t.font.color } },
+        xaxis: { gridcolor: t.gridcolor, linecolor: t.linecolor, zerolinecolor: t.gridcolor },
+        yaxis: { title: 'Yield (%)', gridcolor: t.gridcolor, linecolor: t.linecolor, zerolinecolor: t.gridcolor },
+    };
+    const traces = [];
+    const multiCountry = selectedCountries.length > 1;
+
+    if(mode === 'country'){
+        layout.xaxis.title = 'Tenor';
+        layout.xaxis.categoryorder = 'array';
+        layout.xaxis.categoryarray = ["1M","3M","6M","1Y","2Y","5Y","10Y","30Y"];
+        data.forEach(row => {
+            const vt = selectedTenors.filter(tn => row[tn] !== null);
+            if(!vt.length) return;
+            const label = multiCountry ? `${countryLabel(row.country)} ${row.date}` : row.date;
+            traces.push({ x: vt, y: vt.map(tn => row[tn]), type:'scatter', mode:'lines+markers', name: label });
+        });
+    } else {
+        layout.xaxis.title = 'Date';
+        data.forEach(c => {
+            const dates = Object.keys(c.data).sort();
+            selectedTenors.forEach(tn => {
+                const y = dates.map(d => c.data[d][tn] !== undefined ? c.data[d][tn] : null);
+                const label = multiCountry ? `${countryLabel(c.country)} ${tn}` : tn;
+                traces.push({ x: dates, y, type:'scatter', mode:'lines+markers', name: label, connectgaps: true });
+            });
+        });
+    }
+
+    Plotly.newPlot(chartDiv, traces, layout, { responsive:true, displayModeBar:false });
+}
+
+// ── Table ─────────────────────────────────────────────────────────
+const TABLE_ROW_LIMIT = 500;
+
+function updateTable(data, mode) {
+    const selectedTenors = getSelectedTenors();
+    const td  = 'px-5 py-2.5 text-gray-700 dark:text-slate-300';
+    const tdr = 'px-5 py-2.5 text-right font-mono text-gray-900 dark:text-slate-100';
+    const mkrow = (date, country, tenor, val) =>
+        `<tr><td class="${td}">${date}</td><td class="${td}">${country}</td><td class="${td}">${tenor}</td><td class="${tdr}">${val != null ? val : '-'}</td></tr>`;
+
+    const rows = [];
+    if(mode === 'country'){
+        data.forEach(c => selectedTenors.forEach(t => {
+            rows.push(mkrow(c.date || todayStr(), countryLabel(c.country), t, c[t]));
+        }));
+    } else {
+        data.forEach(c => Object.keys(c.data).sort().forEach(d => selectedTenors.forEach(t => {
+            rows.push(mkrow(d, countryLabel(c.country), t, c.data[d][t]));
+        })));
+    }
+
+    const truncated = rows.length > TABLE_ROW_LIMIT;
+    const visible = truncated ? rows.slice(0, TABLE_ROW_LIMIT) : rows;
+    tableBody.innerHTML = visible.join('');
+
+    const note = document.getElementById('table-note');
+    if(truncated){
+        note.textContent = `Showing first ${TABLE_ROW_LIMIT} of ${rows.length} rows.`;
+        note.classList.remove('hidden');
+    } else {
+        note.classList.add('hidden');
+    }
+}
+
+// ── Event listeners ───────────────────────────────────────────────
+modeSelect.addEventListener('change', fetchData);
+startDateInput.addEventListener('change', fetchData);
+endDateInput.addEventListener('change', fetchData);
+tenorCheckboxes.forEach(cb => cb.addEventListener('change', fetchData));
+
+document.getElementById('toggle-theme').addEventListener('click', () => {
+    document.documentElement.classList.toggle('dark');
+    if(lastChart) updateChart(lastChart.data, lastChart.mode, lastChart.selectedCountries);
+});
+
+fetchData();
+</script>
+
+</body>
+</html>
