@@ -44,54 +44,11 @@ def root():
     return FileResponse("frontend/index.html")
 
 
-@app.get("/debug/scrape/{country}")
-def debug_scrape(country: str = "united_states"):
-    """Diagnose Bloomberg scraping. country = united_states | united_kingdom | germany"""
-    import traceback
-    url_map = {
-        "united_states": "https://www.bloomberg.com/markets/rates-bonds/government-bonds/us",
-        "united_kingdom": "https://www.bloomberg.com/markets/rates-bonds/government-bonds/uk",
-        "germany":        "https://www.bloomberg.com/markets/rates-bonds/government-bonds/germany",
-    }
-    url = url_map.get(country)
-    if not url:
-        return {"error": "unknown country"}
-    try:
-        with Stealth().use_sync(sync_playwright()) as p:
-            browser = p.chromium.launch(
-                headless=True,
-                args=["--no-sandbox", "--disable-setuid-sandbox"]
-            )
-            page = browser.new_page()
-            try:
-                page.goto(url, wait_until="domcontentloaded", timeout=30000)
-                page.wait_for_timeout(5000)
-                title = page.title()
-                raw = page.evaluate("""() => {
-                    const result = {};
-                    for (const table of document.querySelectorAll('table')) {
-                        const headers = Array.from(table.querySelectorAll('thead th'))
-                            .map(th => th.textContent.trim().toLowerCase());
-                        const yieldCol = headers.findIndex(h => h.includes('yield'));
-                        if (yieldCol === -1) continue;
-                        for (const row of table.querySelectorAll('tbody tr')) {
-                            const cells = Array.from(row.querySelectorAll('td'));
-                            if (cells.length <= yieldCol) continue;
-                            const name = cells[0].textContent.trim().toLowerCase();
-                            const val = parseFloat(
-                                cells[yieldCol].textContent.trim()
-                                    .replace('%','').replace('+','')
-                            );
-                            if (name && !isNaN(val)) result[name] = val;
-                        }
-                    }
-                    return result;
-                }""")
-            finally:
-                browser.close()
-        return {"title": title, "rows": raw}
-    except Exception:
-        return {"error": traceback.format_exc()}
+@app.get("/debug/scrape")
+def debug_scrape():
+    """Scrape all three Bloomberg pages in one session and return raw results."""
+    result = scrape_bloomberg_batch(["united_states", "united_kingdom", "germany"])
+    return result
 
 
 # ---------------- helpers ----------------
@@ -158,8 +115,57 @@ def fetch_financeflow(country, tenor):
 
 # ---------------- Bloomberg Scrapers ----------------
 
-def parse_bloomberg(url, mapping):
+BLOOMBERG_URLS = {
+    "united_states": "https://www.bloomberg.com/markets/rates-bonds/government-bonds/us",
+    "united_kingdom": "https://www.bloomberg.com/markets/rates-bonds/government-bonds/uk",
+    "germany":        "https://www.bloomberg.com/markets/rates-bonds/government-bonds/germany",
+}
+
+BLOOMBERG_MAPPINGS = {
+    "united_states": {
+        "3M": "3 month", "6M": "6 month", "1Y": "12 month",
+        "2Y": "2 year",  "5Y": "5 year",  "10Y": "10 year", "30Y": "30 year",
+    },
+    "united_kingdom": {
+        "2Y": "2 year", "5Y": "5 year", "10Y": "10 year", "30Y": "30 year",
+    },
+    "germany": {
+        "2Y": "2 year", "5Y": "5 year", "10Y": "10 year", "30Y": "30 year",
+    },
+}
+
+_JS_EXTRACT = """() => {
+    const result = {};
+    for (const table of document.querySelectorAll('table')) {
+        const headers = Array.from(table.querySelectorAll('thead th'))
+            .map(th => th.textContent.trim().toLowerCase());
+        const yieldCol = headers.findIndex(h => h.includes('yield'));
+        if (yieldCol === -1) continue;
+        for (const row of table.querySelectorAll('tbody tr')) {
+            const cells = Array.from(row.querySelectorAll('td'));
+            if (cells.length <= yieldCol) continue;
+            const name = cells[0].textContent.trim().toLowerCase();
+            const val = parseFloat(
+                cells[yieldCol].textContent.trim().replace('%','').replace('+','')
+            );
+            if (name && !isNaN(val)) result[name] = val;
+        }
+    }
+    return result;
+}"""
+
+
+def scrape_bloomberg_batch(countries):
+    """
+    Scrape Bloomberg for all requested countries in a single browser session,
+    pausing between page loads to avoid bot detection.
+    Returns {country: {tenor: value}}.
+    """
     import traceback
+    results = {c: {} for c in countries}
+    targets = [c for c in countries if c in BLOOMBERG_URLS]
+    if not targets:
+        return results
     try:
         with Stealth().use_sync(sync_playwright()) as p:
             browser = p.chromium.launch(
@@ -168,99 +174,37 @@ def parse_bloomberg(url, mapping):
             )
             page = browser.new_page()
             try:
-                page.goto(url, wait_until="domcontentloaded", timeout=30000)
-                page.wait_for_timeout(5000)
-
-                raw = page.evaluate("""() => {
-                    const result = {};
-                    for (const table of document.querySelectorAll('table')) {
-                        const headers = Array.from(
-                            table.querySelectorAll('thead th')
-                        ).map(th => th.textContent.trim().toLowerCase());
-                        const yieldCol = headers.findIndex(h => h.includes('yield'));
-                        if (yieldCol === -1) continue;
-                        for (const row of table.querySelectorAll('tbody tr')) {
-                            const cells = Array.from(row.querySelectorAll('td'));
-                            if (cells.length <= yieldCol) continue;
-                            const name = cells[0].textContent.trim().toLowerCase();
-                            const val = parseFloat(
-                                cells[yieldCol].textContent.trim()
-                                    .replace('%', '').replace('+', '')
-                            );
-                            if (name && !isNaN(val)) result[name] = val;
-                        }
-                    }
-                    return result;
-                }""")
+                for i, country in enumerate(targets):
+                    if i > 0:
+                        page.wait_for_timeout(3000)
+                    page.goto(BLOOMBERG_URLS[country], wait_until="domcontentloaded", timeout=30000)
+                    page.wait_for_timeout(5000)
+                    raw = page.evaluate(_JS_EXTRACT)
+                    mapping = BLOOMBERG_MAPPINGS[country]
+                    yields = {}
+                    for tenor, label in mapping.items():
+                        for name, val in raw.items():
+                            if label in name:
+                                yields[tenor] = val
+                                break
+                    results[country] = yields
             finally:
                 browser.close()
-
-        yields = {}
-        for tenor, label in mapping.items():
-            label_lower = label.lower()
-            for name, val in raw.items():
-                if label_lower in name:
-                    yields[tenor] = val
-                    break
-        return yields
-
     except Exception:
-        print(f"parse_bloomberg error for {url}:\n{traceback.format_exc()}")
-        return {}
+        print(f"scrape_bloomberg_batch error:\n{traceback.format_exc()}")
+    return results
 
 
-def scrape_us():
-    mapping = {
-        "3M":  "3 month",
-        "6M":  "6 month",
-        "1Y":  "12 month",
-        "2Y":  "2 year",
-        "5Y":  "5 year",
-        "10Y": "10 year",
-        "30Y": "30 year",
-    }
-    return parse_bloomberg(
-        "https://www.bloomberg.com/markets/rates-bonds/government-bonds/us",
-        mapping
-    )
-
-
-def scrape_uk():
-    mapping = {
-        "2Y":  "2 year",
-        "5Y":  "5 year",
-        "10Y": "10 year",
-        "30Y": "30 year",
-    }
-    return parse_bloomberg(
-        "https://www.bloomberg.com/markets/rates-bonds/government-bonds/uk",
-        mapping
-    )
-
-
-def scrape_germany():
-    mapping = {
-        "2Y":  "2 year",
-        "5Y":  "5 year",
-        "10Y": "10 year",
-        "30Y": "30 year",
-    }
-    return parse_bloomberg(
-        "https://www.bloomberg.com/markets/rates-bonds/government-bonds/germany",
-        mapping
-    )
-
-
-# ---------------- Bloomberg scrapers by country ----------------
-
-def fetch_scraped_only(country):
-    if country == "united_states":
-        return scrape_us()
-    if country == "united_kingdom":
-        return scrape_uk()
-    if country == "germany":
-        return scrape_germany()
-    return {}
+def ensure_bloomberg_cached(countries):
+    """Populate TODAY_BLOOMBERG_CACHE for any countries not yet scraped."""
+    needed = [c for c in countries if c not in TODAY_BLOOMBERG_CACHE]
+    if not needed:
+        return
+    batch = scrape_bloomberg_batch(needed)
+    for country, scraped in batch.items():
+        vals = {t: scraped.get(t) for t in tenors}
+        if any(v is not None for v in vals.values()):
+            TODAY_BLOOMBERG_CACHE[country] = vals
 
 
 # ---------------- Today's yields (Bloomberg default, FinanceFlow fallback/override) ----------------
@@ -279,14 +223,10 @@ def get_today_yields(country, use_api=False):
         return TODAY_API_CACHE[country]
 
     if country not in TODAY_BLOOMBERG_CACHE:
-        scraped = fetch_scraped_only(country)
-        vals = {t: scraped.get(t) for t in tenors}
-        if any(v is not None for v in vals.values()):
-            TODAY_BLOOMBERG_CACHE[country] = vals
-        else:
-            return vals  # don't cache failures — retry on next request
+        # Single-country fallback (e.g. called outside a batch context)
+        ensure_bloomberg_cached([country])
 
-    return TODAY_BLOOMBERG_CACHE[country]
+    return TODAY_BLOOMBERG_CACHE.get(country, {t: None for t in tenors})
 
 
 # ---------------- endpoint ----------------
@@ -309,6 +249,14 @@ def get_yield_curve(
 
     if not target:
         return {"error": "No valid countries specified"}
+
+    # Pre-scrape all needed countries in one browser session before any loops
+    today_in_range = (
+        (date and date == today_str) or
+        (start and end and start <= today_str <= end)
+    )
+    if force_scrape and today_in_range:
+        ensure_bloomberg_cached(target)
 
     # -------- country mode range --------
 
