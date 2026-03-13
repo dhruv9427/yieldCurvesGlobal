@@ -44,10 +44,18 @@ def root():
     return FileResponse("frontend/index.html")
 
 
-@app.get("/debug/scrape")
-def debug_scrape():
-    """Diagnose Bloomberg scraping on the deployed environment."""
+@app.get("/debug/scrape/{country}")
+def debug_scrape(country: str = "united_states"):
+    """Diagnose Bloomberg scraping. country = united_states | united_kingdom | germany"""
     import traceback
+    url_map = {
+        "united_states": "https://www.bloomberg.com/markets/rates-bonds/government-bonds/us",
+        "united_kingdom": "https://www.bloomberg.com/markets/rates-bonds/government-bonds/uk",
+        "germany":        "https://www.bloomberg.com/markets/rates-bonds/government-bonds/germany",
+    }
+    url = url_map.get(country)
+    if not url:
+        return {"error": "unknown country"}
     try:
         with Stealth().use_sync(sync_playwright()) as p:
             browser = p.chromium.launch(
@@ -56,11 +64,7 @@ def debug_scrape():
             )
             page = browser.new_page()
             try:
-                page.goto(
-                    "https://www.bloomberg.com/markets/rates-bonds/government-bonds/us",
-                    wait_until="domcontentloaded",
-                    timeout=30000
-                )
+                page.goto(url, wait_until="domcontentloaded", timeout=30000)
                 page.wait_for_timeout(5000)
                 title = page.title()
                 raw = page.evaluate("""() => {
@@ -276,7 +280,11 @@ def get_today_yields(country, use_api=False):
 
     if country not in TODAY_BLOOMBERG_CACHE:
         scraped = fetch_scraped_only(country)
-        TODAY_BLOOMBERG_CACHE[country] = {t: scraped.get(t) for t in tenors}
+        vals = {t: scraped.get(t) for t in tenors}
+        if any(v is not None for v in vals.values()):
+            TODAY_BLOOMBERG_CACHE[country] = vals
+        else:
+            return vals  # don't cache failures — retry on next request
 
     return TODAY_BLOOMBERG_CACHE[country]
 

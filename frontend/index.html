@@ -331,6 +331,7 @@ function updateChart(data, mode, selectedCountries) {
     const layout = {
         plot_bgcolor: t.plot_bgcolor, paper_bgcolor: t.paper_bgcolor, font: t.font,
         margin: { t:20, r:20, b:50, l:55 },
+        showlegend: true,
         legend: { bgcolor: 'rgba(0,0,0,0)', font: { color: t.font.color } },
         xaxis: { gridcolor: t.gridcolor, linecolor: t.linecolor, zerolinecolor: t.gridcolor },
         yaxis: { title: 'Yield (%)', gridcolor: t.gridcolor, linecolor: t.linecolor, zerolinecolor: t.gridcolor },
