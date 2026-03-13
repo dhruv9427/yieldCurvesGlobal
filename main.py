@@ -125,7 +125,7 @@ def parse_bloomberg(url, mapping):
     """
     try:
         with Stealth().use_sync(sync_playwright()) as p:
-            browser = p.chromium.launch(headless=True)
+            browser = p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-setuid-sandbox"])
             context = browser.new_context(
                 user_agent=(
                     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
