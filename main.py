@@ -164,23 +164,14 @@ def fetch_financeflow(country, tenor):
 # ---------------- Bloomberg Scrapers ----------------
 
 def parse_bloomberg(url, mapping):
-    """
-    Launches a stealth headless browser, loads the Bloomberg page, finds the
-    Treasury/Gilt/Bund <table>, locates the Yield column, and returns
-    {tenor: float} using partial case-insensitive label matching on the Name cell.
-    """
+    import traceback
     try:
         with Stealth().use_sync(sync_playwright()) as p:
-            browser = p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-setuid-sandbox"])
-            context = browser.new_context(
-                user_agent=(
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/120.0.0.0 Safari/537.36"
-                ),
-                viewport={"width": 1280, "height": 800},
+            browser = p.chromium.launch(
+                headless=True,
+                args=["--no-sandbox", "--disable-setuid-sandbox"]
             )
-            page = context.new_page()
+            page = browser.new_page()
             try:
                 page.goto(url, wait_until="domcontentloaded", timeout=30000)
                 page.wait_for_timeout(5000)
@@ -219,6 +210,7 @@ def parse_bloomberg(url, mapping):
         return yields
 
     except Exception:
+        print(f"parse_bloomberg error for {url}:\n{traceback.format_exc()}")
         return {}
 
 
