@@ -81,6 +81,7 @@
         <select id="mode" class="px-3 py-2 rounded-lg border border-gray-200 dark:border-navy-600 bg-gray-50 dark:bg-navy-900 text-gray-900 dark:text-slate-100 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer">
           <option value="country">Country</option>
           <option value="tenor">Tenor</option>
+          <option value="spread">Spread</option>
         </select>
       </div>
 
@@ -150,14 +151,14 @@ Yield Curve
 
 <div class="flex items-center gap-2 text-xs">
 
-<span class="text-gray-400 dark:text-slate-500">Bloomberg</span>
+<span class="text-gray-400 dark:text-slate-500">FinanceFlowAPI</span>
 
 <button id="bloomberg-toggle" class="relative w-10 h-5 focus:outline-none bb-on">
 <div id="bb-track" class="w-10 h-5 rounded-full bg-gray-300"></div>
 <div id="bb-thumb" class="absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow"></div>
 </button>
 
-<span class="text-gray-400 dark:text-slate-500">API</span>
+<span class="text-gray-400 dark:text-slate-500">Bloomberg</span>
 
 </div>
 
@@ -191,6 +192,33 @@ const API_BASE = window.location.hostname === 'localhost' || window.location.hos
     : '';
 const COUNTRY_LABELS = {united_states:'US', united_kingdom:'UK', france:'FRA', germany:'GER'};
 function countryLabel(c){ return COUNTRY_LABELS[c] || c; }
+
+const TENOR_ORDER = {
+  "1M": 1,
+  "3M": 2,
+  "6M": 3,
+  "1Y": 4,
+  "2Y": 5,
+  "5Y": 6,
+  "10Y": 7,
+  "30Y": 8
+};
+function getSpreadTenors() {
+
+    const selected = getSelectedTenors()
+
+    if(selected.length !== 2) return null
+
+    const ordered = [...selected].sort(
+        (a,b) => TENOR_ORDER[a] - TENOR_ORDER[b]
+    )
+
+    return {
+        small: ordered[0],
+        large: ordered[1]
+    }
+
+}
 
 const modeSelect       = document.getElementById('mode');
 const startDateInput   = document.getElementById('start_date');
@@ -254,12 +282,23 @@ startDateInput.value = todayStr();
 endDateInput.value   = todayStr();
 
 function setTenorDefaults() {
+
     if(modeSelect.value === 'country'){
         tenorCheckboxes.forEach(cb => cb.checked = true);
-    } else {
+    }
+
+    else if(modeSelect.value === 'tenor'){
         tenorCheckboxes.forEach(cb => cb.checked = (cb.value === '10Y'));
     }
+
+    else if(modeSelect.value === 'spread'){
+        tenorCheckboxes.forEach(cb =>
+            cb.checked = (cb.value === '2Y' || cb.value === '10Y')
+        );
+    }
+
 }
+
 setTenorDefaults();
 modeSelect.addEventListener('change', () => { setTenorDefaults(); fetchData(); });
 
@@ -288,12 +327,23 @@ async function fetchData() {
         }
 
         const raw = await fetch(url).then(r => { if(!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); });
+        console.log("API response:", raw);
         if(raw.error) { showError(raw.error); return; }
 
-        // Normalise: tenor mode single-country returns plain object — wrap it
-        const data = (mode === 'tenor' && !Array.isArray(raw))
-            ? [{ country: selected[0], data: raw }]
-            : raw;
+        // Normalise API responses
+        let data = raw;
+
+        if (!Array.isArray(raw)) {
+
+          if (raw.data) {
+              data = [raw];   // already in {country,data} format
+          } else {
+              data = [{
+                  country: selected[0],
+                  data: raw
+              }];
+          }
+}
 
         clearError();
         lastChart = { data, mode, selectedCountries: selected };
@@ -327,42 +377,130 @@ function plotlyTheme() {
 
 // ── Chart ─────────────────────────────────────────────────────────
 function updateChart(data, mode, selectedCountries) {
+
     const selectedTenors = getSelectedTenors();
     const t = plotlyTheme();
+
     const layout = {
-        plot_bgcolor: t.plot_bgcolor, paper_bgcolor: t.paper_bgcolor, font: t.font,
+        plot_bgcolor: t.plot_bgcolor,
+        paper_bgcolor: t.paper_bgcolor,
+        font: t.font,
         margin: { t:20, r:20, b:50, l:55 },
         showlegend: true,
         legend: { bgcolor: 'rgba(0,0,0,0)', font: { color: t.font.color } },
         xaxis: { gridcolor: t.gridcolor, linecolor: t.linecolor, zerolinecolor: t.gridcolor },
         yaxis: { title: 'Yield (%)', gridcolor: t.gridcolor, linecolor: t.linecolor, zerolinecolor: t.gridcolor },
     };
+
     const traces = [];
     const multiCountry = selectedCountries.length > 1;
 
     if(mode === 'country'){
+
         layout.xaxis.title = 'Tenor';
         layout.xaxis.categoryorder = 'array';
         layout.xaxis.categoryarray = ["1M","3M","6M","1Y","2Y","5Y","10Y","30Y"];
+
         data.forEach(row => {
+
             const vt = selectedTenors.filter(tn => row[tn] !== null);
+
             if(!vt.length) return;
-            const label = multiCountry ? `${countryLabel(row.country)} ${row.date}` : row.date;
-            traces.push({ x: vt, y: vt.map(tn => row[tn]), type:'scatter', mode:'lines+markers', name: label });
-        });
-    } else {
-        layout.xaxis.title = 'Date';
-        data.forEach(c => {
-            const dates = Object.keys(c.data).sort();
-            selectedTenors.forEach(tn => {
-                const y = dates.map(d => c.data[d][tn] !== undefined ? c.data[d][tn] : null);
-                const label = multiCountry ? `${countryLabel(c.country)} ${tn}` : tn;
-                traces.push({ x: dates, y, type:'scatter', mode:'lines+markers', name: label, connectgaps: true });
+
+            const label = multiCountry
+                ? `${countryLabel(row.country)} ${row.date}`
+                : row.date;
+
+            traces.push({
+                x: vt,
+                y: vt.map(tn => row[tn]),
+                type:'scatter',
+                mode:'lines+markers',
+                name: label
             });
+
         });
+
     }
 
-    Plotly.newPlot(chartDiv, traces, layout, { responsive:true, displayModeBar:false });
+    else {
+
+        layout.xaxis.title = 'Date';
+
+        if(mode === 'spread'){
+            layout.yaxis.title = 'Spread (bps)';
+        }
+
+        data.forEach(c => {
+
+            const dates = Object.keys(c.data).sort();
+
+            if(mode === 'spread'){
+
+                const spread = getSpreadTenors();
+                if(!spread) return;
+
+                const small = spread.small;
+                const large = spread.large;
+
+                const y = dates.map(d => {
+
+                    const s = c.data[d][small];
+                    const l = c.data[d][large];
+
+                    if(s == null || l == null) return null;
+
+                    return (l - s) * 100;
+
+                });
+
+                const label = `${countryLabel(c.country)} ${large}-${small}`;
+
+                traces.push({
+                    x: dates,
+                    y,
+                    type:'scatter',
+                    mode:'lines+markers',
+                    name: label,
+                    connectgaps:true
+                });
+
+            }
+
+            else{
+
+                selectedTenors.forEach(tn => {
+
+                    const y = dates.map(d =>
+                        c.data[d][tn] !== undefined ? c.data[d][tn] : null
+                    );
+
+                    const label = multiCountry
+                        ? `${countryLabel(c.country)} ${tn}`
+                        : tn;
+
+                    traces.push({
+                        x: dates,
+                        y,
+                        type:'scatter',
+                        mode:'lines+markers',
+                        name: label,
+                        connectgaps:true
+                    });
+
+                });
+
+            }
+
+        });
+
+    }
+
+    Plotly.newPlot(chartDiv, traces, layout, {
+        responsive:true,
+        displayModeBar:false
+    });
+
 }
 
 // ── Table ─────────────────────────────────────────────────────────
@@ -381,10 +519,57 @@ function updateTable(data, mode) {
             rows.push(mkrow(c.date || todayStr(), countryLabel(c.country), t, c[t]));
         }));
     } else {
-        data.forEach(c => Object.keys(c.data).sort().forEach(d => selectedTenors.forEach(t => {
-            rows.push(mkrow(d, countryLabel(c.country), t, c.data[d][t]));
-        })));
-    }
+
+    data.forEach(c => {
+
+        const dates = Object.keys(c.data).sort()
+
+        if(mode === 'spread'){
+
+            const selected = getSelectedTenors()
+
+            if(selected.length !== 2) return
+
+            const small = selected[0]
+            const large = selected[1]
+
+            dates.forEach(d => {
+
+                const s = c.data[d][small]
+                const l = c.data[d][large]
+
+                const spread =
+                    (s != null && l != null)
+                    ? ((l - s) * 100).toFixed(2)
+                    : null
+
+                rows.push(
+                    mkrow(d, countryLabel(c.country), `${large}-${small}`, spread)
+                )
+
+            })
+
+        }
+
+        else{
+
+            dates.forEach(d => {
+
+                selectedTenors.forEach(t => {
+
+                    rows.push(
+                        mkrow(d, countryLabel(c.country), t, c.data[d][t])
+                    )
+
+                })
+
+            })
+
+        }
+
+    })
+
+}
 
     const truncated = rows.length > TABLE_ROW_LIMIT;
     const visible = truncated ? rows.slice(0, TABLE_ROW_LIMIT) : rows;
@@ -403,7 +588,24 @@ function updateTable(data, mode) {
 modeSelect.addEventListener('change', fetchData);
 startDateInput.addEventListener('change', fetchData);
 endDateInput.addEventListener('change', fetchData);
-tenorCheckboxes.forEach(cb => cb.addEventListener('change', fetchData));
+tenorCheckboxes.forEach(cb => {
+  cb.addEventListener('change', () => {
+
+    if(modeSelect.value === 'spread'){
+
+        const selected = getSelectedTenors()
+
+        if(selected.length > 2){
+            cb.checked = false
+            return
+        }
+
+    }
+
+    fetchData()
+
+  })
+})
 
 document.getElementById('toggle-theme').addEventListener('click', () => {
     document.documentElement.classList.toggle('dark');
