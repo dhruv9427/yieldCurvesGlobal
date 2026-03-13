@@ -1,3 +1,5 @@
 fastapi==0.135.1
 uvicorn==0.41.0
 requests==2.32.5
+playwright>=1.40.0
+playwright-stealth>=2.0.0

@@ -24,6 +24,11 @@
   html.dark #toggle-thumb { transform: translateX(1.5rem); }
   html.dark #toggle-track { background-color: #3b82f6; }
 
+  /* Bloomberg data toggle */
+  #bb-thumb { transition: transform 0.25s ease; }
+  .bb-on #bb-thumb { transform: translateX(1.25rem); }
+  .bb-on #bb-track { background-color: #3b82f6; }
+
   /* Shared pill style (tenor + country) */
   .pill-cb input[type=checkbox], .pill-cb input[type=radio] { display: none; }
   .pill-cb span {
@@ -135,9 +140,32 @@
   <div id="error-msg" class="hidden mb-4 px-4 py-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 text-sm"></div>
 
   <!-- Chart -->
-  <div class="bg-white dark:bg-navy-800 rounded-2xl shadow-sm border border-gray-200 dark:border-navy-600 p-4 mb-5">
-    <div id="chart" style="height:460px;"></div>
-  </div>
+<div class="bg-white dark:bg-navy-800 rounded-2xl shadow-sm border border-gray-200 dark:border-navy-600 p-4 mb-5">
+
+<div class="flex items-center justify-between mb-2">
+
+<div class="text-sm text-gray-500 dark:text-slate-400">
+Yield Curve
+</div>
+
+<div class="flex items-center gap-2 text-xs">
+
+<span class="text-gray-400 dark:text-slate-500">Bloomberg</span>
+
+<button id="bloomberg-toggle" class="relative w-10 h-5 focus:outline-none bb-on">
+<div id="bb-track" class="w-10 h-5 rounded-full bg-gray-300"></div>
+<div id="bb-thumb" class="absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow"></div>
+</button>
+
+<span class="text-gray-400 dark:text-slate-500">API</span>
+
+</div>
+
+</div>
+
+<div id="chart" style="height:460px;"></div>
+
+</div>
 
   <!-- Table -->
   <p id="table-note" class="hidden text-xs text-gray-400 dark:text-slate-500 mb-1 text-right"></p>
@@ -173,6 +201,8 @@ const countryCheckboxes = document.querySelectorAll('#country-dropdown input[nam
 const chartDiv         = document.getElementById('chart');
 const tableBody        = document.querySelector('#yield-table tbody');
 
+let forceBloomberg = true;
+
 let lastChart = null; // { data, mode, selectedCountries }
 
 function getSelectedTenors()    { return Array.from(tenorCheckboxes).filter(cb => cb.checked).map(cb => cb.value); }
@@ -188,6 +218,14 @@ function isDark()    { return document.documentElement.classList.contains('dark'
 const countryBtn      = document.getElementById('country-btn');
 const countryDropdown = document.getElementById('country-dropdown');
 const countryBtnLabel = document.getElementById('country-btn-label');
+
+const bbToggle = document.getElementById("bloomberg-toggle");
+
+bbToggle.addEventListener("click", () => {
+  forceBloomberg = !forceBloomberg;
+  bbToggle.classList.toggle("bb-on");
+  fetchData();
+});
 
 countryBtn.addEventListener('click', e => {
     e.stopPropagation();
@@ -212,8 +250,8 @@ document.querySelector('#country-dropdown input[value="united_states"]').checked
 updateCountryBtnLabel();
 
 // ── Defaults ─────────────────────────────────────────────────────
-startDateInput.value = yesterdayStr();
-endDateInput.value   = yesterdayStr();
+startDateInput.value = todayStr();
+endDateInput.value   = todayStr();
 
 function setTenorDefaults() {
     if(modeSelect.value === 'country'){
@@ -241,7 +279,7 @@ async function fetchData() {
 
     try {
         const sc = selected.join(',');
-        let url = `${API_BASE}/yield-curve/all?selected_countries=${sc}`;
+        let url = `${API_BASE}/yield-curve/all?selected_countries=${sc}&force_scrape=${forceBloomberg}`;
         if(mode === 'country'){
             url += `&start=${start||todayStr()}&end=${end||todayStr()}&view=country`;
         } else {
