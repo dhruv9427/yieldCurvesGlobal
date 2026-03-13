@@ -44,6 +44,52 @@ def root():
     return FileResponse("frontend/index.html")
 
 
+@app.get("/debug/scrape")
+def debug_scrape():
+    """Diagnose Bloomberg scraping on the deployed environment."""
+    import traceback
+    try:
+        with Stealth().use_sync(sync_playwright()) as p:
+            browser = p.chromium.launch(
+                headless=True,
+                args=["--no-sandbox", "--disable-setuid-sandbox"]
+            )
+            page = browser.new_page()
+            try:
+                page.goto(
+                    "https://www.bloomberg.com/markets/rates-bonds/government-bonds/us",
+                    wait_until="domcontentloaded",
+                    timeout=30000
+                )
+                page.wait_for_timeout(5000)
+                title = page.title()
+                raw = page.evaluate("""() => {
+                    const result = {};
+                    for (const table of document.querySelectorAll('table')) {
+                        const headers = Array.from(table.querySelectorAll('thead th'))
+                            .map(th => th.textContent.trim().toLowerCase());
+                        const yieldCol = headers.findIndex(h => h.includes('yield'));
+                        if (yieldCol === -1) continue;
+                        for (const row of table.querySelectorAll('tbody tr')) {
+                            const cells = Array.from(row.querySelectorAll('td'));
+                            if (cells.length <= yieldCol) continue;
+                            const name = cells[0].textContent.trim().toLowerCase();
+                            const val = parseFloat(
+                                cells[yieldCol].textContent.trim()
+                                    .replace('%','').replace('+','')
+                            );
+                            if (name && !isNaN(val)) result[name] = val;
+                        }
+                    }
+                    return result;
+                }""")
+            finally:
+                browser.close()
+        return {"title": title, "rows": raw}
+    except Exception:
+        return {"error": traceback.format_exc()}
+
+
 # ---------------- helpers ----------------
 
 def too_many_missing(values, threshold=1):
