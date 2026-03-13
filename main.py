@@ -3,7 +3,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 import requests
 from datetime import date as dt_date, timedelta
-import math
 from playwright.sync_api import sync_playwright
 from playwright_stealth import Stealth
 
@@ -36,7 +35,8 @@ us_historical_series = {
 }
 
 
-TODAY_CACHE = {}
+TODAY_BLOOMBERG_CACHE = {}   # Bloomberg + FinanceFlow fallback
+TODAY_API_CACHE = {}         # FinanceFlow only (toggle forced)
 
 
 @app.get("/")
@@ -91,15 +91,6 @@ def debug_scrape():
 
 
 # ---------------- helpers ----------------
-
-def too_many_missing(values, threshold=1):
-    missing = 0
-    for v in values:
-        if v is None:
-            missing += 1
-        elif isinstance(v, float) and math.isnan(v):
-            missing += 1
-    return missing > threshold
 
 
 def date_range(start_date, end_date):
@@ -256,7 +247,7 @@ def scrape_germany():
     )
 
 
-# ---------------- Force-scrape from Bloomberg ----------------
+# ---------------- Bloomberg scrapers by country ----------------
 
 def fetch_scraped_only(country):
     if country == "united_states":
@@ -268,17 +259,26 @@ def fetch_scraped_only(country):
     return {}
 
 
-# ---------------- Today fetch with fallback ----------------
+# ---------------- Today's yields (Bloomberg default, FinanceFlow fallback/override) ----------------
 
-def fetch_today_yields(country):
-    """Fetch today's yields from FinanceFlow API (only used when forced via toggle)."""
-    if country in TODAY_CACHE:
-        return TODAY_CACHE[country]
+def get_today_yields(country, use_api=False):
+    """
+    use_api=False (default, Bloomberg toggle ON):
+        Scrape Bloomberg; fall back to FinanceFlow for any missing tenors.
+    use_api=True (FinanceFlow toggle ON):
+        Call FinanceFlow directly, skip Bloomberg.
+    Results are cached per-source for the lifetime of the server process.
+    """
+    if use_api:
+        if country not in TODAY_API_CACHE:
+            TODAY_API_CACHE[country] = {t: fetch_financeflow(country, t) for t in tenors}
+        return TODAY_API_CACHE[country]
 
-    vals = {t: fetch_financeflow(country, t) for t in tenors}
+    if country not in TODAY_BLOOMBERG_CACHE:
+        scraped = fetch_scraped_only(country)
+        TODAY_BLOOMBERG_CACHE[country] = {t: scraped.get(t) for t in tenors}
 
-    TODAY_CACHE[country] = vals
-    return vals
+    return TODAY_BLOOMBERG_CACHE[country]
 
 
 # ---------------- endpoint ----------------
@@ -323,8 +323,6 @@ def get_yield_curve(
 
         result = []
 
-        today_scraped_cache = {}
-
         for d in all_dates:
 
             for c in target:
@@ -332,12 +330,7 @@ def get_yield_curve(
                 row = {"date": d, "country": c}
 
                 if d == today_str:
-                    if force_scrape:
-                        if c not in today_scraped_cache:
-                            today_scraped_cache[c] = fetch_scraped_only(c)
-                        today_yields = today_scraped_cache[c]
-                    else:
-                        today_yields = fetch_today_yields(c)
+                    today_yields = get_today_yields(c, use_api=not force_scrape)
 
                 for t in tenors:
 
@@ -362,7 +355,7 @@ def get_yield_curve(
 
             yields = {}
 
-            today_yields = (fetch_scraped_only(c) if force_scrape else fetch_today_yields(c)) if date == today_str else None
+            today_yields = get_today_yields(c, use_api=not force_scrape) if date == today_str else None
 
             for t in tenors:
 
@@ -415,7 +408,7 @@ def get_yield_curve(
                 country_data[d] = {}
 
                 if d == today_str and today_yields is None:
-                    today_yields = fetch_scraped_only(c) if force_scrape else fetch_today_yields(c)
+                    today_yields = get_today_yields(c, use_api=not force_scrape)
 
                 for t in tenors:
 

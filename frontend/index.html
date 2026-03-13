@@ -98,10 +98,10 @@
         <div id="country-dropdown"
           class="absolute top-full left-0 mt-1.5 z-50 hidden bg-white dark:bg-navy-800 border border-gray-200 dark:border-navy-600 rounded-xl shadow-xl p-3 min-w-[160px]">
           <div class="flex flex-col gap-2">
-            <label class="pill-cb"><input type="radio" name="country" value="united_states"><span class="w-full">🇺🇸 US</span></label>
-            <label class="pill-cb"><input type="radio" name="country" value="united_kingdom"><span class="w-full">🇬🇧 UK</span></label>
-            <label class="pill-cb"><input type="radio" name="country" value="germany"><span class="w-full">🇩🇪 GER</span></label>
-            <label class="pill-cb"><input type="radio" name="country" value="france"><span class="w-full">🇫🇷 FRA</span></label>
+            <label class="pill-cb"><input type="checkbox" name="country" value="united_states"><span class="w-full">🇺🇸 US</span></label>
+            <label class="pill-cb"><input type="checkbox" name="country" value="united_kingdom"><span class="w-full">🇬🇧 UK</span></label>
+            <label class="pill-cb"><input type="checkbox" name="country" value="germany"><span class="w-full">🇩🇪 GER</span></label>
+            <label class="pill-cb"><input type="checkbox" name="country" value="france"><span class="w-full">🇫🇷 FRA</span></label>
           </div>
         </div>
       </div>
@@ -207,8 +207,7 @@ let lastChart = null; // { data, mode, selectedCountries }
 
 function getSelectedTenors()    { return Array.from(tenorCheckboxes).filter(cb => cb.checked).map(cb => cb.value); }
 function getSelectedCountries() {
-    const checked = document.querySelector('#country-dropdown input[name=country]:checked');
-    return checked ? [checked.value] : [];
+    return Array.from(document.querySelectorAll('#country-dropdown input[name=country]:checked')).map(cb => cb.value);
 }
 function todayStr()     { return new Date().toISOString().split('T')[0]; }
 function yesterdayStr() { const d = new Date(); d.setDate(d.getDate()-1); return d.toISOString().split('T')[0]; }
