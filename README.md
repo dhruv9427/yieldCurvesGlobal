@@ -6,7 +6,7 @@ Product description
 https://yieldcurvesglobal.up.railway.app
 
 Real-time Data
-I get real-time data for US, UK, GER, FRA (though the FinanceFlowAPI source charges me per API call so I default the date picker to previous day).🤣
+I get real-time data for US, UK, GER, FRA (though the FinanceFlowAPI source charges me per API call so I default the date picker to Bloomberg).🤣
 
 Historical Data
 St Louis Fed has a FRED API for all historical data for USTs. 
