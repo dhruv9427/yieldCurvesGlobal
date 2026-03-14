@@ -59,6 +59,7 @@ TODAY_BLOOMBERG_CACHE = {}   # Bloomberg + FinanceFlow fallback
 TODAY_API_CACHE = {}         # FinanceFlow only (toggle forced)
 
 LAST_GOOD_CACHE_FILE = "bloomberg_last_good.json"
+HISTORICAL_CACHE_FILE = "historical_yields_cache.json"
 
 
 def _load_last_good_cache():
@@ -79,7 +80,26 @@ def _save_last_good_cache(cache):
         pass
 
 
+def _load_historical_cache():
+    if os.path.exists(HISTORICAL_CACHE_FILE):
+        try:
+            with open(HISTORICAL_CACHE_FILE) as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {}
+
+
+def _save_historical_cache(cache):
+    try:
+        with open(HISTORICAL_CACHE_FILE, "w") as f:
+            json.dump(cache, f, indent=2)
+    except Exception:
+        pass
+
+
 BLOOMBERG_LAST_GOOD_CACHE = _load_last_good_cache()  # {country: {tenor: {value, timestamp}}}
+HISTORICAL_YIELDS_CACHE = _load_historical_cache()   # {country: {date: {tenor: {value, source}}}}
 
 
 @app.get("/")
@@ -265,9 +285,11 @@ def ensure_bloomberg_cached(countries):
         return
     batch = scrape_bloomberg_batch(needed)
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    today_str = dt_date.today().isoformat()
     cache_updated = False
+    historical_updated = False
     for country, scraped in batch.items():
-        # Persist any fresh values into the last-good cache
+        # Persist any fresh values into the last-good cache and historical cache
         for t in tenors:
             v = scraped.get(t)
             if v is not None:
@@ -276,6 +298,12 @@ def ensure_bloomberg_cached(countries):
                     "timestamp": now,
                 }
                 cache_updated = True
+                # Save to historical cache so non-US countries build up a repository
+                HISTORICAL_YIELDS_CACHE.setdefault(country, {}).setdefault(today_str, {})[t] = {
+                    "value": v,
+                    "source": "Cache",
+                }
+                historical_updated = True
 
         # Build today's cache, falling back to last-good for missing tenors
         vals = {}
@@ -298,6 +326,8 @@ def ensure_bloomberg_cached(countries):
 
     if cache_updated:
         _save_last_good_cache(BLOOMBERG_LAST_GOOD_CACHE)
+    if historical_updated:
+        _save_historical_cache(HISTORICAL_YIELDS_CACHE)
 
 
 # ---------------- Today's yields (Bloomberg default, FinanceFlow fallback/override) ----------------
@@ -391,7 +421,9 @@ def get_yield_curve(
                         row[t] = val["value"] if val else None
                         row[f"{t}_source"] = val["source"] if val else None
                     else:
-                        row[t] = None
+                        val = HISTORICAL_YIELDS_CACHE.get(c, {}).get(d, {}).get(t)
+                        row[t] = val["value"] if val else None
+                        row[f"{t}_source"] = val["source"] if val else None
 
                 result.append(row)
 
@@ -419,7 +451,8 @@ def get_yield_curve(
                     for t, data in zip(tenors, results)
                 }
             else:
-                yields = {t: None for t in tenors}
+                cached = HISTORICAL_YIELDS_CACHE.get(c, {}).get(date, {})
+                yields = {t: cached.get(t) for t in tenors}
 
             result.append({"date": date, "country": c, **yields})
 
@@ -467,7 +500,7 @@ def get_yield_curve(
                         country_data[d][t] = us_cache.get(d, {}).get(t)
 
                     else:
-                        country_data[d][t] = None
+                        country_data[d][t] = HISTORICAL_YIELDS_CACHE.get(c, {}).get(d, {}).get(t)
 
             result.append({"country": c, "data": country_data})
 
