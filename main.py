@@ -1,12 +1,32 @@
+from contextlib import asynccontextmanager
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from functools import partial
 from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 import requests
-from datetime import date as dt_date, timedelta
+import json
+import os
+import threading
+from datetime import date as dt_date, timedelta, datetime
 from playwright.sync_api import sync_playwright
 from playwright_stealth import Stealth
 
-app = FastAPI()
+
+def _prewarm():
+    """Populate both caches for all countries at startup in the background."""
+    ensure_bloomberg_cached(ALL_COUNTRIES)
+    for country in ALL_COUNTRIES:
+        _populate_api_cache(country)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    threading.Thread(target=_prewarm, daemon=True).start()
+    yield
+
+
+app = FastAPI(lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -37,6 +57,29 @@ us_historical_series = {
 
 TODAY_BLOOMBERG_CACHE = {}   # Bloomberg + FinanceFlow fallback
 TODAY_API_CACHE = {}         # FinanceFlow only (toggle forced)
+
+LAST_GOOD_CACHE_FILE = "bloomberg_last_good.json"
+
+
+def _load_last_good_cache():
+    if os.path.exists(LAST_GOOD_CACHE_FILE):
+        try:
+            with open(LAST_GOOD_CACHE_FILE) as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {}
+
+
+def _save_last_good_cache(cache):
+    try:
+        with open(LAST_GOOD_CACHE_FILE, "w") as f:
+            json.dump(cache, f)
+    except Exception:
+        pass
+
+
+BLOOMBERG_LAST_GOOD_CACHE = _load_last_good_cache()  # {country: {tenor: {value, timestamp}}}
 
 
 @app.get("/")
@@ -119,6 +162,17 @@ def fetch_financeflow(country, tenor):
         return None
 
 
+def _populate_api_cache(country):
+    """Fetch all tenors for a country from FinanceFlow in parallel and cache."""
+    if country in TODAY_API_CACHE:
+        return
+    with ThreadPoolExecutor(max_workers=len(tenors)) as pool:
+        futures = {pool.submit(fetch_financeflow, country, t): t for t in tenors}
+        TODAY_API_CACHE[country] = {
+            futures[f]: f.result() for f in as_completed(futures)
+        }
+
+
 # ---------------- Bloomberg Scrapers ----------------
 
 BLOOMBERG_URLS = {
@@ -183,17 +237,20 @@ def scrape_bloomberg_batch(countries):
                 for i, country in enumerate(targets):
                     if i > 0:
                         page.wait_for_timeout(3000)
-                    page.goto(BLOOMBERG_URLS[country], wait_until="domcontentloaded", timeout=30000)
-                    page.wait_for_timeout(5000)
-                    raw = page.evaluate(_JS_EXTRACT)
-                    mapping = BLOOMBERG_MAPPINGS[country]
-                    yields = {}
-                    for tenor, label in mapping.items():
-                        for name, val in raw.items():
-                            if label in name:
-                                yields[tenor] = val
-                                break
-                    results[country] = yields
+                    try:
+                        page.goto(BLOOMBERG_URLS[country], wait_until="domcontentloaded", timeout=60000)
+                        page.wait_for_timeout(5000)
+                        raw = page.evaluate(_JS_EXTRACT)
+                        mapping = BLOOMBERG_MAPPINGS[country]
+                        yields = {}
+                        for tenor, label in mapping.items():
+                            for name, val in raw.items():
+                                if label in name:
+                                    yields[tenor] = val
+                                    break
+                        results[country] = yields
+                    except Exception:
+                        print(f"scrape_bloomberg_batch: failed for {country}:\n{traceback.format_exc()}")
             finally:
                 browser.close()
     except Exception:
@@ -207,16 +264,40 @@ def ensure_bloomberg_cached(countries):
     if not needed:
         return
     batch = scrape_bloomberg_batch(needed)
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    cache_updated = False
     for country, scraped in batch.items():
-        vals = {
-            t: {
-                "value": scraped.get(t),
-                "source": "Bloomberg Rates"
-            } if scraped.get(t) is not None else None
-            for t in tenors
-        }
+        # Persist any fresh values into the last-good cache
+        for t in tenors:
+            v = scraped.get(t)
+            if v is not None:
+                BLOOMBERG_LAST_GOOD_CACHE.setdefault(country, {})[t] = {
+                    "value": v,
+                    "timestamp": now,
+                }
+                cache_updated = True
+
+        # Build today's cache, falling back to last-good for missing tenors
+        vals = {}
+        for t in tenors:
+            v = scraped.get(t)
+            if v is not None:
+                vals[t] = {"value": v, "source": "Bloomberg Rates"}
+            else:
+                last = BLOOMBERG_LAST_GOOD_CACHE.get(country, {}).get(t)
+                if last:
+                    vals[t] = {
+                        "value": last["value"],
+                        "source": f"Bloomberg (Last Received: {last['timestamp']})",
+                    }
+                else:
+                    vals[t] = None
+
         if any(v is not None for v in vals.values()):
             TODAY_BLOOMBERG_CACHE[country] = vals
+
+    if cache_updated:
+        _save_last_good_cache(BLOOMBERG_LAST_GOOD_CACHE)
 
 
 # ---------------- Today's yields (Bloomberg default, FinanceFlow fallback/override) ----------------
@@ -230,11 +311,7 @@ def get_today_yields(country, use_api=False):
     Results are cached per-source for the lifetime of the server process.
     """
     if use_api:
-        if country not in TODAY_API_CACHE:
-            TODAY_API_CACHE[country] = {
-                t: fetch_financeflow(country, t)
-                for t in tenors
-            }
+        _populate_api_cache(country)
         return TODAY_API_CACHE[country]
 
     if country not in TODAY_BLOOMBERG_CACHE:
@@ -287,10 +364,10 @@ def get_yield_curve(
 
             rs, re = min(non_today), max(non_today)
 
-            for t in tenors:
-
-                for d, vals in fetch_us_historical(t, start=rs, end=re).items():
-                    us_cache.setdefault(d, {}).update(vals)
+            with ThreadPoolExecutor(max_workers=len(tenors)) as pool:
+                for tenor_data in pool.map(partial(fetch_us_historical, start=rs, end=re), tenors):
+                    for d, vals in tenor_data.items():
+                        us_cache.setdefault(d, {}).update(vals)
 
         result = []
 
@@ -332,21 +409,17 @@ def get_yield_curve(
 
             today_yields = get_today_yields(c, use_api=not force_scrape) if date == today_str else None
 
-            for t in tenors:
-
-                if date == today_str:
-                    yields[t] = today_yields.get(t)
-                else:
-
-                    if c == "united_states":
-
-                        val = fetch_us_historical(t, start=date, end=date)
-
-                        yields[t] = list(val.values())[0][t] if val else None
-
-                    else:
-
-                        yields[t] = None
+            if date == today_str:
+                yields = {t: today_yields.get(t) for t in tenors}
+            elif c == "united_states":
+                with ThreadPoolExecutor(max_workers=len(tenors)) as pool:
+                    results = pool.map(partial(fetch_us_historical, start=date, end=date), tenors)
+                yields = {
+                    t: list(data.values())[0][t] if data else None
+                    for t, data in zip(tenors, results)
+                }
+            else:
+                yields = {t: None for t in tenors}
 
             result.append({"date": date, "country": c, **yields})
 
@@ -366,10 +439,10 @@ def get_yield_curve(
 
             rs, re = min(non_today), max(non_today)
 
-            for t in tenors:
-
-                for d, vals in fetch_us_historical(t, start=rs, end=re).items():
-                    us_cache.setdefault(d, {}).update(vals)
+            with ThreadPoolExecutor(max_workers=len(tenors)) as pool:
+                for tenor_data in pool.map(partial(fetch_us_historical, start=rs, end=re), tenors):
+                    for d, vals in tenor_data.items():
+                        us_cache.setdefault(d, {}).update(vals)
 
         result = []
 
