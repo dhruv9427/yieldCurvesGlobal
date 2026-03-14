@@ -102,6 +102,34 @@ BLOOMBERG_LAST_GOOD_CACHE = _load_last_good_cache()  # {country: {tenor: {value,
 HISTORICAL_YIELDS_CACHE = _load_historical_cache()   # {country: {date: {tenor: {value, source}}}}
 
 
+def _seed_historical_from_last_good():
+    """
+    Seed the historical cache from bloomberg_last_good.json on startup.
+    Each entry in last_good carries a timestamp — extract the date from it and
+    populate HISTORICAL_YIELDS_CACHE so we always have the most recently scraped
+    data available for historical queries even if historical_yields_cache.json
+    was freshly initialised or deleted.
+    """
+    updated = False
+    for country, tenors_data in BLOOMBERG_LAST_GOOD_CACHE.items():
+        for tenor, entry in tenors_data.items():
+            if "timestamp" not in entry or "value" not in entry:
+                continue
+            date_str = entry["timestamp"][:10]  # YYYY-MM-DD
+            # Don't overwrite if we already have data for this date/tenor
+            if not HISTORICAL_YIELDS_CACHE.get(country, {}).get(date_str, {}).get(tenor):
+                HISTORICAL_YIELDS_CACHE.setdefault(country, {}).setdefault(date_str, {})[tenor] = {
+                    "value": entry["value"],
+                    "source": "Cache",
+                }
+                updated = True
+    if updated:
+        _save_historical_cache(HISTORICAL_YIELDS_CACHE)
+
+
+_seed_historical_from_last_good()
+
+
 @app.get("/")
 def root():
     return FileResponse("frontend/index.html")
@@ -418,6 +446,9 @@ def get_yield_curve(
                         row[f"{t}_source"] = val["source"] if val else None
                     elif c == "united_states":
                         val = us_cache.get(d, {}).get(t)
+                        # FRED had no data for this date — fall back to Bloomberg historical cache
+                        if val is None:
+                            val = HISTORICAL_YIELDS_CACHE.get(c, {}).get(d, {}).get(t)
                         row[t] = val["value"] if val else None
                         row[f"{t}_source"] = val["source"] if val else None
                     else:
@@ -445,11 +476,14 @@ def get_yield_curve(
                 yields = {t: today_yields.get(t) for t in tenors}
             elif c == "united_states":
                 with ThreadPoolExecutor(max_workers=len(tenors)) as pool:
-                    results = pool.map(partial(fetch_us_historical, start=date, end=date), tenors)
-                yields = {
-                    t: list(data.values())[0][t] if data else None
-                    for t, data in zip(tenors, results)
-                }
+                    fred_results = pool.map(partial(fetch_us_historical, start=date, end=date), tenors)
+                yields = {}
+                for t, data in zip(tenors, fred_results):
+                    val = list(data.values())[0][t] if data else None
+                    # FRED had no data for this date — fall back to Bloomberg historical cache
+                    if val is None:
+                        val = HISTORICAL_YIELDS_CACHE.get(c, {}).get(date, {}).get(t)
+                    yields[t] = val
             else:
                 cached = HISTORICAL_YIELDS_CACHE.get(c, {}).get(date, {})
                 yields = {t: cached.get(t) for t in tenors}
@@ -497,7 +531,11 @@ def get_yield_curve(
                         country_data[d][t] = today_yields.get(t)
 
                     elif c == "united_states":
-                        country_data[d][t] = us_cache.get(d, {}).get(t)
+                        val = us_cache.get(d, {}).get(t)
+                        # FRED had no data for this date — fall back to Bloomberg historical cache
+                        if val is None:
+                            val = HISTORICAL_YIELDS_CACHE.get(c, {}).get(d, {}).get(t)
+                        country_data[d][t] = val
 
                     else:
                         country_data[d][t] = HISTORICAL_YIELDS_CACHE.get(c, {}).get(d, {}).get(t)
