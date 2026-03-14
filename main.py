@@ -90,7 +90,10 @@ def fetch_us_historical(tenor, start=None, end=None):
 
     for o in obs:
         if o["value"] != ".":
-            out.setdefault(o["date"], {})[tenor] = float(o["value"])
+            out.setdefault(o["date"], {})[tenor] = {
+                "value": float(o["value"]),
+                "source": "FRED API"
+            }
 
     return out
 
@@ -108,7 +111,10 @@ def fetch_financeflow(country, tenor):
 
     try:
         r = requests.get(url, params=params, timeout=5).json()
-        return float(r["data"][0]["bond_yield"])
+        return {
+            "value": float(r["data"][0]["bond_yield"]),
+            "source": "FinanceFlowAPI"
+        }
     except:
         return None
 
@@ -202,7 +208,13 @@ def ensure_bloomberg_cached(countries):
         return
     batch = scrape_bloomberg_batch(needed)
     for country, scraped in batch.items():
-        vals = {t: scraped.get(t) for t in tenors}
+        vals = {
+            t: {
+                "value": scraped.get(t),
+                "source": "Bloomberg Rates"
+            } if scraped.get(t) is not None else None
+            for t in tenors
+        }
         if any(v is not None for v in vals.values()):
             TODAY_BLOOMBERG_CACHE[country] = vals
 
@@ -219,14 +231,17 @@ def get_today_yields(country, use_api=False):
     """
     if use_api:
         if country not in TODAY_API_CACHE:
-            TODAY_API_CACHE[country] = {t: fetch_financeflow(country, t) for t in tenors}
+            TODAY_API_CACHE[country] = {
+                t: fetch_financeflow(country, t)
+                for t in tenors
+            }
         return TODAY_API_CACHE[country]
 
     if country not in TODAY_BLOOMBERG_CACHE:
         # Single-country fallback (e.g. called outside a batch context)
         ensure_bloomberg_cached([country])
 
-    return TODAY_BLOOMBERG_CACHE.get(country, {t: None for t in tenors})
+    return TODAY_BLOOMBERG_CACHE.get(country, {})
 
 
 # ---------------- endpoint ----------------
@@ -291,9 +306,13 @@ def get_yield_curve(
                 for t in tenors:
 
                     if d == today_str:
-                        row[t] = today_yields.get(t)
+                        val = today_yields.get(t)
+                        row[t] = val["value"] if val else None
+                        row[f"{t}_source"] = val["source"] if val else None
                     elif c == "united_states":
-                        row[t] = us_cache.get(d, {}).get(t)
+                        val = us_cache.get(d, {}).get(t)
+                        row[t] = val["value"] if val else None
+                        row[f"{t}_source"] = val["source"] if val else None
                     else:
                         row[t] = None
 

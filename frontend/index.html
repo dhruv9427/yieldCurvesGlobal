@@ -178,6 +178,7 @@ Yield Curve
           <th class="px-5 py-3 text-left text-xs font-semibold text-gray-500 dark:text-slate-400 uppercase tracking-wider">Country</th>
           <th class="px-5 py-3 text-left text-xs font-semibold text-gray-500 dark:text-slate-400 uppercase tracking-wider">Tenor</th>
           <th class="px-5 py-3 text-right text-xs font-semibold text-gray-500 dark:text-slate-400 uppercase tracking-wider">Yield (%)</th>
+          <th class="px-5 py-3 text-left text-xs font-semibold text-gray-500 dark:text-slate-400 uppercase tracking-wider">Source</th>
         </tr>
       </thead>
       <tbody class="divide-y divide-gray-100 dark:divide-navy-700"></tbody>
@@ -445,8 +446,10 @@ function updateChart(data, mode, selectedCountries) {
 
                 const y = dates.map(d => {
 
-                    const s = c.data[d][small];
-                    const l = c.data[d][large];
+                    const s = c.data[d][small]?.value
+                    const l = c.data[d][large]?.value
+
+                    const source = c.data[d][small]?.source || c.data[d][large]?.source
 
                     if(s == null || l == null) return null;
 
@@ -472,7 +475,7 @@ function updateChart(data, mode, selectedCountries) {
                 selectedTenors.forEach(tn => {
 
                     const y = dates.map(d =>
-                        c.data[d][tn] !== undefined ? c.data[d][tn] : null
+                        c.data[d][tn]?.value ?? null
                     );
 
                     const label = multiCountry
@@ -510,13 +513,19 @@ function updateTable(data, mode) {
     const selectedTenors = getSelectedTenors();
     const td  = 'px-5 py-2.5 text-gray-700 dark:text-slate-300';
     const tdr = 'px-5 py-2.5 text-right font-mono text-gray-900 dark:text-slate-100';
-    const mkrow = (date, country, tenor, val) =>
-        `<tr><td class="${td}">${date}</td><td class="${td}">${country}</td><td class="${td}">${tenor}</td><td class="${tdr}">${val != null ? val : '-'}</td></tr>`;
+    const mkrow = (date, country, tenor, val, source) =>
+  `<tr>
+    <td class="${td}">${date}</td>
+    <td class="${td}">${country}</td>
+    <td class="${td}">${tenor}</td>
+    <td class="${tdr}">${val != null ? val : '-'}</td>
+    <td class="${td}">${source || '-'}</td>
+  </tr>`;
 
     const rows = [];
     if(mode === 'country'){
         data.forEach(c => selectedTenors.forEach(t => {
-            rows.push(mkrow(c.date || todayStr(), countryLabel(c.country), t, c[t]));
+            rows.push(mkrow(c.date || todayStr(), countryLabel(c.country), t, c[t], c[`${t}_source`]));
         }));
     } else {
 
@@ -535,17 +544,19 @@ function updateTable(data, mode) {
 
             dates.forEach(d => {
 
-                const s = c.data[d][small]
-                const l = c.data[d][large]
+                const s = c.data[d][small]?.value;
+                const l = c.data[d][large]?.value;
+
+                const source = c.data[d][small]?.source ||c.data[d][large]?.source || null;
 
                 const spread =
                     (s != null && l != null)
                     ? ((l - s) * 100).toFixed(2)
                     : null
 
-                rows.push(
-                    mkrow(d, countryLabel(c.country), `${large}-${small}`, spread)
-                )
+                  rows.push(
+                      mkrow(d, countryLabel(c.country), `${large}-${small}`, spread, source)
+                  )
 
             })
 
@@ -558,7 +569,13 @@ function updateTable(data, mode) {
                 selectedTenors.forEach(t => {
 
                     rows.push(
-                        mkrow(d, countryLabel(c.country), t, c.data[d][t])
+                        mkrow(
+                          d,
+                          countryLabel(c.country),
+                          t,
+                          c.data[d][t]?.value,
+                          c.data[d][t]?.source
+                        )
                     )
 
                 })
