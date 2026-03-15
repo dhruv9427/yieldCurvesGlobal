@@ -57,6 +57,7 @@ us_historical_series = {
 
 TODAY_BLOOMBERG_CACHE = {}   # Bloomberg + FinanceFlow fallback
 TODAY_API_CACHE = {}         # FinanceFlow only (toggle forced)
+_bloomberg_cache_date = None  # Tracks which calendar date TODAY_BLOOMBERG_CACHE was populated for
 
 LAST_GOOD_CACHE_FILE = "bloomberg_last_good.json"
 HISTORICAL_CACHE_FILE = "historical_yields_cache.json"
@@ -308,6 +309,11 @@ def scrape_bloomberg_batch(countries):
 
 def ensure_bloomberg_cached(countries):
     """Populate TODAY_BLOOMBERG_CACHE for any countries not yet scraped."""
+    global TODAY_BLOOMBERG_CACHE, _bloomberg_cache_date
+    today = dt_date.today().isoformat()
+    if _bloomberg_cache_date != today:
+        TODAY_BLOOMBERG_CACHE = {}
+        _bloomberg_cache_date = today
     needed = [c for c in countries if c not in TODAY_BLOOMBERG_CACHE]
     if not needed:
         return
