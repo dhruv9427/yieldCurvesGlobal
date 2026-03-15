@@ -277,15 +277,15 @@ def scrape_bloomberg_batch(countries):
         return results
     try:
         with Stealth().use_sync(sync_playwright()) as p:
-            browser = p.chromium.launch(
-                headless=True,
-                args=["--no-sandbox", "--disable-setuid-sandbox"]
-            )
-            page = browser.new_page()
-            try:
-                for i, country in enumerate(targets):
-                    if i > 0:
-                        page.wait_for_timeout(3000)
+            for i, country in enumerate(targets):
+                if i > 0:
+                    import time; time.sleep(3)
+                try:
+                    browser = p.chromium.launch(
+                        headless=True,
+                        args=["--no-sandbox", "--disable-setuid-sandbox"]
+                    )
+                    page = browser.new_page()
                     try:
                         page.goto(BLOOMBERG_URLS[country], wait_until="domcontentloaded", timeout=60000)
                         page.wait_for_timeout(5000)
@@ -298,10 +298,10 @@ def scrape_bloomberg_batch(countries):
                                     yields[tenor] = val
                                     break
                         results[country] = yields
-                    except Exception:
-                        print(f"scrape_bloomberg_batch: failed for {country}:\n{traceback.format_exc()}")
-            finally:
-                browser.close()
+                    finally:
+                        browser.close()
+                except Exception:
+                    print(f"scrape_bloomberg_batch: failed for {country}:\n{traceback.format_exc()}")
     except Exception:
         print(f"scrape_bloomberg_batch error:\n{traceback.format_exc()}")
     return results
