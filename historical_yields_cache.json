@@ -1,0 +1,140 @@
+{
+  "united_states": {
+    "2026-03-14": {
+      "3M": {
+        "value": 3.68,
+        "source": "Cache"
+      },
+      "6M": {
+        "value": 3.65,
+        "source": "Cache"
+      },
+      "1Y": {
+        "value": 3.63,
+        "source": "Cache"
+      },
+      "2Y": {
+        "value": 3.72,
+        "source": "Cache"
+      },
+      "5Y": {
+        "value": 3.86,
+        "source": "Cache"
+      },
+      "10Y": {
+        "value": 4.28,
+        "source": "Cache"
+      },
+      "30Y": {
+        "value": 4.9,
+        "source": "Cache"
+      }
+    },
+    "2026-03-15": {
+      "3M": {
+        "value": 3.68,
+        "source": "Cache"
+      },
+      "6M": {
+        "value": 3.65,
+        "source": "Cache"
+      },
+      "1Y": {
+        "value": 3.63,
+        "source": "Cache"
+      },
+      "2Y": {
+        "value": 3.72,
+        "source": "Cache"
+      },
+      "5Y": {
+        "value": 3.86,
+        "source": "Cache"
+      },
+      "10Y": {
+        "value": 4.28,
+        "source": "Cache"
+      },
+      "30Y": {
+        "value": 4.9,
+        "source": "Cache"
+      }
+    }
+  },
+  "united_kingdom": {
+    "2026-03-14": {
+      "2Y": {
+        "value": 4.12,
+        "source": "Cache"
+      },
+      "5Y": {
+        "value": 4.34,
+        "source": "Cache"
+      },
+      "10Y": {
+        "value": 4.82,
+        "source": "Cache"
+      },
+      "30Y": {
+        "value": 5.49,
+        "source": "Cache"
+      }
+    },
+    "2026-03-15": {
+      "2Y": {
+        "value": 4.12,
+        "source": "Cache"
+      },
+      "5Y": {
+        "value": 4.34,
+        "source": "Cache"
+      },
+      "10Y": {
+        "value": 4.82,
+        "source": "Cache"
+      },
+      "30Y": {
+        "value": 5.49,
+        "source": "Cache"
+      }
+    }
+  },
+  "germany": {
+    "2026-03-14": {
+      "2Y": {
+        "value": 2.43,
+        "source": "Cache"
+      },
+      "5Y": {
+        "value": 2.63,
+        "source": "Cache"
+      },
+      "10Y": {
+        "value": 2.98,
+        "source": "Cache"
+      },
+      "30Y": {
+        "value": 3.53,
+        "source": "Cache"
+      }
+    },
+    "2026-03-15": {
+      "2Y": {
+        "value": 2.43,
+        "source": "Cache"
+      },
+      "5Y": {
+        "value": 2.63,
+        "source": "Cache"
+      },
+      "10Y": {
+        "value": 2.98,
+        "source": "Cache"
+      },
+      "30Y": {
+        "value": 3.53,
+        "source": "Cache"
+      }
+    }
+  }
+}

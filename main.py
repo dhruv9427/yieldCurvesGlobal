@@ -290,6 +290,7 @@ def scrape_bloomberg_batch(countries):
                         page.goto(BLOOMBERG_URLS[country], wait_until="domcontentloaded", timeout=60000)
                         page.wait_for_timeout(5000)
                         raw = page.evaluate(_JS_EXTRACT)
+                        print(f"scrape_bloomberg_batch: {country} raw={raw}")
                         mapping = BLOOMBERG_MAPPINGS[country]
                         yields = {}
                         for tenor, label in mapping.items():
@@ -297,6 +298,7 @@ def scrape_bloomberg_batch(countries):
                                 if label in name:
                                     yields[tenor] = val
                                     break
+                        print(f"scrape_bloomberg_batch: {country} yields={yields}")
                         results[country] = yields
                     finally:
                         browser.close()
@@ -307,17 +309,16 @@ def scrape_bloomberg_batch(countries):
     return results
 
 
-def ensure_bloomberg_cached(countries):
-    """Populate TODAY_BLOOMBERG_CACHE for any countries not yet scraped."""
-    global TODAY_BLOOMBERG_CACHE, _bloomberg_cache_date
-    today = dt_date.today().isoformat()
-    if _bloomberg_cache_date != today:
-        TODAY_BLOOMBERG_CACHE = {}
-        _bloomberg_cache_date = today
-    needed = [c for c in countries if c not in TODAY_BLOOMBERG_CACHE]
-    if not needed:
-        return
-    batch = scrape_bloomberg_batch(needed)
+def _has_live_bloomberg_data(country):
+    """Return True if country has at least one live Bloomberg value (not just fallback) today."""
+    return any(
+        v is not None and v.get("source") == "Bloomberg Rates"
+        for v in TODAY_BLOOMBERG_CACHE.get(country, {}).values()
+    )
+
+
+def _process_bloomberg_batch(batch):
+    """Merge a scrape_bloomberg_batch result into the caches. Returns (cache_updated, historical_updated)."""
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     today_str = dt_date.today().isoformat()
     cache_updated = False
@@ -357,6 +358,41 @@ def ensure_bloomberg_cached(countries):
 
         if any(v is not None for v in vals.values()):
             TODAY_BLOOMBERG_CACHE[country] = vals
+
+    return cache_updated, historical_updated
+
+
+def ensure_bloomberg_cached(countries):
+    """Populate TODAY_BLOOMBERG_CACHE for any countries not yet scraped.
+
+    Rotates call order across up to len(needed) rounds so each country gets a
+    chance to be first in the batch (Bloomberg tends to return data for the
+    first caller and block subsequent ones). Short-circuits as soon as every
+    country has live data, so performance is unaffected in the happy path.
+    """
+    global TODAY_BLOOMBERG_CACHE, _bloomberg_cache_date
+    today = dt_date.today().isoformat()
+    if _bloomberg_cache_date != today:
+        TODAY_BLOOMBERG_CACHE = {}
+        _bloomberg_cache_date = today
+    needed = [c for c in countries if c not in TODAY_BLOOMBERG_CACHE]
+    if not needed:
+        return
+
+    cache_updated = False
+    historical_updated = False
+    n = len(needed)
+    for rotation in range(n):
+        # Countries still lacking live Bloomberg data, in rotated order
+        rotated = needed[rotation:] + needed[:rotation]
+        to_scrape = [c for c in rotated if not _has_live_bloomberg_data(c)]
+        if not to_scrape:
+            break
+        print(f"ensure_bloomberg_cached: rotation {rotation + 1}/{n}, scraping {to_scrape}")
+        batch = scrape_bloomberg_batch(to_scrape)
+        cu, hu = _process_bloomberg_batch(batch)
+        cache_updated = cache_updated or cu
+        historical_updated = historical_updated or hu
 
     if cache_updated:
         _save_last_good_cache(BLOOMBERG_LAST_GOOD_CACHE)
