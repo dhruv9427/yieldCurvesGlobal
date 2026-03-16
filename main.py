@@ -23,6 +23,7 @@ def _prewarm():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     threading.Thread(target=_prewarm, daemon=True).start()
+    threading.Thread(target=_eod_scheduler, daemon=True).start()
     yield
 
 
@@ -61,6 +62,7 @@ _bloomberg_cache_date = None  # Tracks which calendar date TODAY_BLOOMBERG_CACHE
 
 LAST_GOOD_CACHE_FILE = "bloomberg_last_good.json"
 HISTORICAL_CACHE_FILE = "historical_yields_cache.json"
+FINANCEFLOW_HISTORICAL_CACHE_FILE = "financeflow_historical_cache.json"
 
 
 def _load_last_good_cache():
@@ -99,8 +101,27 @@ def _save_historical_cache(cache):
         pass
 
 
+def _load_financeflow_historical_cache():
+    if os.path.exists(FINANCEFLOW_HISTORICAL_CACHE_FILE):
+        try:
+            with open(FINANCEFLOW_HISTORICAL_CACHE_FILE) as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {}
+
+
+def _save_financeflow_historical_cache(cache):
+    try:
+        with open(FINANCEFLOW_HISTORICAL_CACHE_FILE, "w") as f:
+            json.dump(cache, f, indent=2)
+    except Exception:
+        pass
+
+
 BLOOMBERG_LAST_GOOD_CACHE = _load_last_good_cache()  # {country: {tenor: {value, timestamp}}}
 HISTORICAL_YIELDS_CACHE = _load_historical_cache()   # {country: {date: {tenor: {value, source}}}}
+FINANCEFLOW_HISTORICAL_CACHE = _load_financeflow_historical_cache()  # {country: {date: {tenor: {value, source}}}}
 
 
 def _seed_historical_from_last_good():
@@ -121,7 +142,7 @@ def _seed_historical_from_last_good():
             if not HISTORICAL_YIELDS_CACHE.get(country, {}).get(date_str, {}).get(tenor):
                 HISTORICAL_YIELDS_CACHE.setdefault(country, {}).setdefault(date_str, {})[tenor] = {
                     "value": entry["value"],
-                    "source": "Cache",
+                    "source": "BBG Cache",
                 }
                 updated = True
     if updated:
@@ -141,6 +162,13 @@ def debug_scrape():
     """Scrape all three Bloomberg pages in one session and return raw results."""
     result = scrape_bloomberg_batch(["united_states", "united_kingdom", "germany"])
     return result
+
+
+@app.get("/debug/financeflow-eod")
+def debug_financeflow_eod():
+    """Manually trigger the FinanceFlow EOD fetch (normally runs at 22:00 BST)."""
+    threading.Thread(target=_fetch_and_store_financeflow_eod, daemon=True).start()
+    return {"status": "triggered", "message": "FinanceFlow EOD fetch started in background"}
 
 
 # ---------------- helpers ----------------
@@ -220,6 +248,46 @@ def _populate_api_cache(country):
         TODAY_API_CACHE[country] = {
             futures[f]: f.result() for f in as_completed(futures)
         }
+
+
+def _fetch_and_store_financeflow_eod():
+    """Fetch all tenors for all countries from FinanceFlow and persist to FinanceFlow historical cache.
+    Intended to run once daily at 10pm BST (21:00 UTC).
+    """
+    today_str = dt_date.today().isoformat()
+    print(f"_fetch_and_store_financeflow_eod: starting for {today_str}")
+    updated = False
+    for country in ALL_COUNTRIES:
+        with ThreadPoolExecutor(max_workers=len(tenors)) as pool:
+            futures = {pool.submit(fetch_financeflow, country, t): t for t in tenors}
+            for future in as_completed(futures):
+                tenor = futures[future]
+                result = future.result()
+                if result is not None:
+                    FINANCEFLOW_HISTORICAL_CACHE.setdefault(country, {}).setdefault(today_str, {})[tenor] = {
+                        "value": result["value"],
+                        "source": "FinanceFlow Cache",
+                    }
+                    updated = True
+    if updated:
+        _save_financeflow_historical_cache(FINANCEFLOW_HISTORICAL_CACHE)
+    print(f"_fetch_and_store_financeflow_eod: completed for {today_str}, updated={updated}")
+
+
+def _eod_scheduler():
+    """Background thread that fires the FinanceFlow EOD fetch at 21:00 UTC (22:00 BST) daily."""
+    import time
+    last_run_date = None
+    while True:
+        now = datetime.utcnow()
+        today = now.date().isoformat()
+        if now.hour == 21 and now.minute == 0 and last_run_date != today:
+            last_run_date = today
+            try:
+                _fetch_and_store_financeflow_eod()
+            except Exception as e:
+                print(f"_eod_scheduler error: {e}")
+        time.sleep(30)
 
 
 # ---------------- Bloomberg Scrapers ----------------
@@ -336,7 +404,7 @@ def _process_bloomberg_batch(batch):
                 # Save to historical cache so non-US countries build up a repository
                 HISTORICAL_YIELDS_CACHE.setdefault(country, {}).setdefault(today_str, {})[t] = {
                     "value": v,
-                    "source": "Cache",
+                    "source": "BBG Cache",
                 }
                 historical_updated = True
 
@@ -421,6 +489,14 @@ def get_today_yields(country, use_api=False):
     return TODAY_BLOOMBERG_CACHE.get(country, {})
 
 
+def _get_historical_cache(force_scrape: bool) -> dict:
+    """Return the appropriate historical cache based on the active data source toggle.
+    Bloomberg mode (force_scrape=True)  → BBG Cache (historical_yields_cache.json)
+    FinanceFlow mode (force_scrape=False) → FinanceFlow Cache (financeflow_historical_cache.json)
+    """
+    return HISTORICAL_YIELDS_CACHE if force_scrape else FINANCEFLOW_HISTORICAL_CACHE
+
+
 # ---------------- endpoint ----------------
 
 @app.get("/yield-curve/{country}")
@@ -488,13 +564,13 @@ def get_yield_curve(
                         row[f"{t}_source"] = val["source"] if val else None
                     elif c == "united_states":
                         val = us_cache.get(d, {}).get(t)
-                        # FRED had no data for this date — fall back to Bloomberg historical cache
+                        # FRED had no data for this date — fall back to source-specific historical cache
                         if val is None:
-                            val = HISTORICAL_YIELDS_CACHE.get(c, {}).get(d, {}).get(t)
+                            val = _get_historical_cache(force_scrape).get(c, {}).get(d, {}).get(t)
                         row[t] = val["value"] if val else None
                         row[f"{t}_source"] = val["source"] if val else None
                     else:
-                        val = HISTORICAL_YIELDS_CACHE.get(c, {}).get(d, {}).get(t)
+                        val = _get_historical_cache(force_scrape).get(c, {}).get(d, {}).get(t)
                         row[t] = val["value"] if val else None
                         row[f"{t}_source"] = val["source"] if val else None
 
@@ -522,12 +598,12 @@ def get_yield_curve(
                 yields = {}
                 for t, data in zip(tenors, fred_results):
                     val = list(data.values())[0][t] if data else None
-                    # FRED had no data for this date — fall back to Bloomberg historical cache
+                    # FRED had no data for this date — fall back to source-specific historical cache
                     if val is None:
-                        val = HISTORICAL_YIELDS_CACHE.get(c, {}).get(date, {}).get(t)
+                        val = _get_historical_cache(force_scrape).get(c, {}).get(date, {}).get(t)
                     yields[t] = val
             else:
-                cached = HISTORICAL_YIELDS_CACHE.get(c, {}).get(date, {})
+                cached = _get_historical_cache(force_scrape).get(c, {}).get(date, {})
                 yields = {t: cached.get(t) for t in tenors}
 
             result.append({"date": date, "country": c, **yields})
@@ -574,13 +650,13 @@ def get_yield_curve(
 
                     elif c == "united_states":
                         val = us_cache.get(d, {}).get(t)
-                        # FRED had no data for this date — fall back to Bloomberg historical cache
+                        # FRED had no data for this date — fall back to source-specific historical cache
                         if val is None:
-                            val = HISTORICAL_YIELDS_CACHE.get(c, {}).get(d, {}).get(t)
+                            val = _get_historical_cache(force_scrape).get(c, {}).get(d, {}).get(t)
                         country_data[d][t] = val
 
                     else:
-                        country_data[d][t] = HISTORICAL_YIELDS_CACHE.get(c, {}).get(d, {}).get(t)
+                        country_data[d][t] = _get_historical_cache(force_scrape).get(c, {}).get(d, {}).get(t)
 
             result.append({"country": c, "data": country_data})
 

@@ -3,61 +3,91 @@
     "2026-03-14": {
       "3M": {
         "value": 3.68,
-        "source": "Cache"
+        "source": "BBG Cache"
       },
       "6M": {
         "value": 3.65,
-        "source": "Cache"
+        "source": "BBG Cache"
       },
       "1Y": {
         "value": 3.63,
-        "source": "Cache"
+        "source": "BBG Cache"
       },
       "2Y": {
         "value": 3.72,
-        "source": "Cache"
+        "source": "BBG Cache"
       },
       "5Y": {
         "value": 3.86,
-        "source": "Cache"
+        "source": "BBG Cache"
       },
       "10Y": {
         "value": 4.28,
-        "source": "Cache"
+        "source": "BBG Cache"
       },
       "30Y": {
         "value": 4.9,
-        "source": "Cache"
+        "source": "BBG Cache"
       }
     },
     "2026-03-15": {
       "3M": {
         "value": 3.68,
-        "source": "Cache"
+        "source": "BBG Cache"
       },
       "6M": {
         "value": 3.65,
-        "source": "Cache"
+        "source": "BBG Cache"
       },
       "1Y": {
         "value": 3.63,
-        "source": "Cache"
+        "source": "BBG Cache"
       },
       "2Y": {
         "value": 3.72,
-        "source": "Cache"
+        "source": "BBG Cache"
       },
       "5Y": {
         "value": 3.86,
-        "source": "Cache"
+        "source": "BBG Cache"
       },
       "10Y": {
         "value": 4.28,
-        "source": "Cache"
+        "source": "BBG Cache"
       },
       "30Y": {
         "value": 4.9,
-        "source": "Cache"
+        "source": "BBG Cache"
+      }
+    },
+    "2026-03-16": {
+      "3M": {
+        "value": 3.68,
+        "source": "BBG Cache"
+      },
+      "6M": {
+        "value": 3.64,
+        "source": "BBG Cache"
+      },
+      "1Y": {
+        "value": 3.61,
+        "source": "BBG Cache"
+      },
+      "2Y": {
+        "value": 3.67,
+        "source": "BBG Cache"
+      },
+      "5Y": {
+        "value": 3.81,
+        "source": "BBG Cache"
+      },
+      "10Y": {
+        "value": 4.23,
+        "source": "BBG Cache"
+      },
+      "30Y": {
+        "value": 4.87,
+        "source": "BBG Cache"
       }
     }
   },
@@ -65,37 +95,55 @@
     "2026-03-14": {
       "2Y": {
         "value": 4.12,
-        "source": "Cache"
+        "source": "BBG Cache"
       },
       "5Y": {
         "value": 4.34,
-        "source": "Cache"
+        "source": "BBG Cache"
       },
       "10Y": {
         "value": 4.82,
-        "source": "Cache"
+        "source": "BBG Cache"
       },
       "30Y": {
         "value": 5.49,
-        "source": "Cache"
+        "source": "BBG Cache"
       }
     },
     "2026-03-15": {
       "2Y": {
         "value": 4.12,
-        "source": "Cache"
+        "source": "BBG Cache"
       },
       "5Y": {
         "value": 4.34,
-        "source": "Cache"
+        "source": "BBG Cache"
       },
       "10Y": {
         "value": 4.82,
-        "source": "Cache"
+        "source": "BBG Cache"
       },
       "30Y": {
         "value": 5.49,
-        "source": "Cache"
+        "source": "BBG Cache"
+      }
+    },
+    "2026-03-16": {
+      "2Y": {
+        "value": 4.06,
+        "source": "BBG Cache"
+      },
+      "5Y": {
+        "value": 4.27,
+        "source": "BBG Cache"
+      },
+      "10Y": {
+        "value": 4.76,
+        "source": "BBG Cache"
+      },
+      "30Y": {
+        "value": 5.43,
+        "source": "BBG Cache"
       }
     }
   },
@@ -103,37 +151,55 @@
     "2026-03-14": {
       "2Y": {
         "value": 2.43,
-        "source": "Cache"
+        "source": "BBG Cache"
       },
       "5Y": {
         "value": 2.63,
-        "source": "Cache"
+        "source": "BBG Cache"
       },
       "10Y": {
         "value": 2.98,
-        "source": "Cache"
+        "source": "BBG Cache"
       },
       "30Y": {
         "value": 3.53,
-        "source": "Cache"
+        "source": "BBG Cache"
       }
     },
     "2026-03-15": {
       "2Y": {
         "value": 2.43,
-        "source": "Cache"
+        "source": "BBG Cache"
       },
       "5Y": {
         "value": 2.63,
-        "source": "Cache"
+        "source": "BBG Cache"
       },
       "10Y": {
         "value": 2.98,
-        "source": "Cache"
+        "source": "BBG Cache"
       },
       "30Y": {
         "value": 3.53,
-        "source": "Cache"
+        "source": "BBG Cache"
+      }
+    },
+    "2026-03-16": {
+      "2Y": {
+        "value": 2.38,
+        "source": "BBG Cache"
+      },
+      "5Y": {
+        "value": 2.59,
+        "source": "BBG Cache"
+      },
+      "10Y": {
+        "value": 2.95,
+        "source": "BBG Cache"
+      },
+      "30Y": {
+        "value": 3.52,
+        "source": "BBG Cache"
       }
     }
   }
