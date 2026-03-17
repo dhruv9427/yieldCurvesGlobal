@@ -60,7 +60,7 @@ TODAY_BLOOMBERG_CACHE = {}   # Bloomberg Data Scraped - default toggle on
 TODAY_FINANCEFLOWAPI_CACHE = {}         # FinanceFlow only (toggle forced)
 _bloomberg_cache_date = None  # Tracks which calendar date TODAY_BLOOMBERG_CACHE was populated for
 
-BBG_LAST_GOOD_CACHE_FILE = "bbg_last_good_cache.json"
+BBG_LAST_GOOD_CACHE_FILE = "bbg_last_good_cache.json" #if we dont have live scraped data lets display the last good result from bbg that we stored
 BBG_HISTORICAL_CACHE_FILE = "bbg_historical_cache.json"
 FINANCEFLOW_HISTORICAL_CACHE_FILE = "financeflow_historical_cache.json"
 
@@ -75,7 +75,7 @@ def _load_bbg_last_good_cache():
     return {}
 
 
-def _save_bbg_last_good_cache(cache):
+def _save_bbg_last_good_cache(cache): #if we dont have live scraped data lets extract the last good result from bbg that we stored
     try:
         with open(BBG_LAST_GOOD_CACHE_FILE, "w") as f:
             json.dump(cache, f)
