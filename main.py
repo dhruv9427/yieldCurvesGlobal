@@ -166,9 +166,12 @@ def debug_scrape():
 
 @app.get("/debug/financeflow-eod")
 def debug_financeflow_eod():
-    """Manually trigger the FinanceFlow EOD fetch (normally runs at 22:00 BST)."""
-    threading.Thread(target=_fetch_and_store_financeflow_eod, daemon=True).start()
-    return {"status": "triggered", "message": "FinanceFlow EOD fetch started in background"}
+    """Manually trigger the FinanceFlow EOD fetch for all countries."""
+    def _run_all():
+        for country in ALL_COUNTRIES:
+            _fetch_and_store_financeflow_eod_country(country)
+    threading.Thread(target=_run_all, daemon=True).start()
+    return {"status": "triggered", "message": "FinanceFlow EOD fetch started in background for all countries"}
 
 
 # ---------------- helpers ----------------
@@ -250,43 +253,62 @@ def _populate_api_cache(country):
         }
 
 
-def _fetch_and_store_financeflow_eod():
-    """Fetch all tenors for all countries from FinanceFlow and persist to FinanceFlow historical cache.
-    Intended to run once daily at 10pm BST (21:00 UTC).
-    """
+# Per-country EOD snapshot times (UTC). UK/GER/FR markets close ~16:00-16:30 UTC,
+# US Treasuries close ~22:00 UTC (5pm EST), so we capture US 15 min after close.
+EOD_SCHEDULE_UTC = {
+    "united_kingdom": (21,  0),
+    "germany":        (21,  5),
+    "france":         (21, 10),
+    "united_states":  (22, 15),
+}
+
+
+def _fetch_and_store_financeflow_eod_country(country):
+    """Fetch all tenors for a single country from FinanceFlow and persist to cache."""
     today_str = dt_date.today().isoformat()
-    print(f"_fetch_and_store_financeflow_eod: starting for {today_str}")
+    print(f"_fetch_and_store_financeflow_eod: starting {country} for {today_str}")
     updated = False
-    for country in ALL_COUNTRIES:
-        with ThreadPoolExecutor(max_workers=len(tenors)) as pool:
-            futures = {pool.submit(fetch_financeflow, country, t): t for t in tenors}
-            for future in as_completed(futures):
-                tenor = futures[future]
-                result = future.result()
-                if result is not None:
-                    FINANCEFLOW_HISTORICAL_CACHE.setdefault(country, {}).setdefault(today_str, {})[tenor] = {
-                        "value": result["value"],
-                        "source": "FinanceFlow Cache",
-                    }
-                    updated = True
+    with ThreadPoolExecutor(max_workers=len(tenors)) as pool:
+        futures = {pool.submit(fetch_financeflow, country, t): t for t in tenors}
+        for future in as_completed(futures):
+            tenor = futures[future]
+            result = future.result()
+            if result is not None:
+                FINANCEFLOW_HISTORICAL_CACHE.setdefault(country, {}).setdefault(today_str, {})[tenor] = {
+                    "value": result["value"],
+                    "source": "FinanceFlow Cache",
+                }
+                updated = True
     if updated:
         _save_financeflow_historical_cache(FINANCEFLOW_HISTORICAL_CACHE)
-    print(f"_fetch_and_store_financeflow_eod: completed for {today_str}, updated={updated}")
+    print(f"_fetch_and_store_financeflow_eod: completed {country} for {today_str}, updated={updated}")
 
 
 def _eod_scheduler():
-    """Background thread that fires the FinanceFlow EOD fetch at 21:00 UTC (22:00 BST) daily."""
+    """Background thread that fires per-country FinanceFlow EOD fetches at their scheduled UTC times.
+    Catch-up logic: on startup, if it is already past a country's scheduled time and that country's
+    data for today is absent, runs immediately so a server restart never skips a day.
+    """
     import time
-    last_run_date = None
+    last_run_dates = {c: None for c in ALL_COUNTRIES}
     while True:
         now = datetime.utcnow()
         today = now.date().isoformat()
-        if now.hour == 21 and now.minute == 0 and last_run_date != today:
-            last_run_date = today
-            try:
-                _fetch_and_store_financeflow_eod()
-            except Exception as e:
-                print(f"_eod_scheduler error: {e}")
+        for country, (sched_hour, sched_min) in EOD_SCHEDULE_UTC.items():
+            already_ran = last_run_dates[country] == today
+            if already_ran:
+                continue
+            past_schedule = (now.hour, now.minute) >= (sched_hour, sched_min)
+            if not past_schedule:
+                continue
+            today_cached = today in FINANCEFLOW_HISTORICAL_CACHE.get(country, {})
+            in_window = now.hour == sched_hour and now.minute == sched_min
+            if in_window or not today_cached:
+                last_run_dates[country] = today
+                try:
+                    _fetch_and_store_financeflow_eod_country(country)
+                except Exception as e:
+                    print(f"_eod_scheduler error ({country}): {e}")
         time.sleep(30)
 
 
