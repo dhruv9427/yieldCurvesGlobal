@@ -65,7 +65,7 @@ BBG_HISTORICAL_CACHE_FILE = "bbg_historical_cache.json"
 FINANCEFLOW_HISTORICAL_CACHE_FILE = "financeflow_historical_cache.json"
 
 
-def _load_last_good_cache():
+def _load_bbg_last_good_cache():
     if os.path.exists(BBG_LAST_GOOD_CACHE_FILE):
         try:
             with open(BBG_LAST_GOOD_CACHE_FILE) as f:
@@ -75,7 +75,7 @@ def _load_last_good_cache():
     return {}
 
 
-def _save_last_good_cache(cache):
+def _save_bbg_last_good_cache(cache):
     try:
         with open(BBG_LAST_GOOD_CACHE_FILE, "w") as f:
             json.dump(cache, f)
@@ -83,7 +83,7 @@ def _save_last_good_cache(cache):
         pass
 
 
-def _load_historical_cache():
+def _load_bbg_historical_cache():
     if os.path.exists(BBG_HISTORICAL_CACHE_FILE):
         try:
             with open(BBG_HISTORICAL_CACHE_FILE) as f:
@@ -93,7 +93,7 @@ def _load_historical_cache():
     return {}
 
 
-def _save_historical_cache(cache):
+def _save_bbg_historical_cache(cache):
     try:
         with open(BBG_HISTORICAL_CACHE_FILE, "w") as f:
             json.dump(cache, f, indent=2)
@@ -119,8 +119,8 @@ def _save_financeflow_historical_cache(cache):
         pass
 
 
-BLOOMBERG_LAST_GOOD_CACHE = _load_last_good_cache()  # {country: {tenor: {value, timestamp}}}
-HISTORICAL_YIELDS_CACHE = _load_historical_cache()   # {country: {date: {tenor: {value, source}}}}
+BLOOMBERG_LAST_GOOD_CACHE = _load_bbg_last_good_cache()  # {country: {tenor: {value, timestamp}}}
+HISTORICAL_YIELDS_CACHE = _load_bbg_historical_cache()   # {country: {date: {tenor: {value, source}}}}
 FINANCEFLOW_HISTORICAL_CACHE = _load_financeflow_historical_cache()  # {country: {date: {tenor: {value, source}}}}
 
 
@@ -146,7 +146,7 @@ def _seed_historical_from_last_good():
                 }
                 updated = True
     if updated:
-        _save_historical_cache(HISTORICAL_YIELDS_CACHE)
+        _save_bbg_historical_cache(HISTORICAL_YIELDS_CACHE)
 
 
 _seed_historical_from_last_good()
@@ -590,9 +590,9 @@ def ensure_bloomberg_cached(countries):
         historical_updated = historical_updated or hu
 
     if cache_updated:
-        _save_last_good_cache(BLOOMBERG_LAST_GOOD_CACHE)
+        _save_bbg_last_good_cache(BLOOMBERG_LAST_GOOD_CACHE)
     if historical_updated:
-        _save_historical_cache(HISTORICAL_YIELDS_CACHE)
+        _save_bbg_historical_cache(HISTORICAL_YIELDS_CACHE)
 
 
 # ---------------- Today's yields (Bloomberg default, FinanceFlow fallback/override) ----------------
