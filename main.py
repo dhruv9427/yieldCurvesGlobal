@@ -61,9 +61,9 @@ TODAY_FINANCEFLOWAPI_CACHE = {}         # FinanceFlow only (toggle forced)
 _bloomberg_cache_date = None  # Tracks which calendar date TODAY_BLOOMBERG_CACHE was populated for
 
 BBG_LAST_GOOD_CACHE_FILE = "bbg_last_good_cache.json" #if we dont have live scraped data lets display the last good result from bbg that we stored
-BBG_HISTORICAL_CACHE_FILE = "bbg_historical_cache.json"
-FINANCEFLOW_HISTORICAL_CACHE_FILE = "financeflow_historical_cache.json"
-
+BBG_HISTORICAL_CACHE_FILE = "bbg_historical_cache.json" #store each days BBG live scraped data in a cache file so we can use it as a historical data repo display - clever isnt it? useful for uk, germany (us at least has FRED)
+FINANCEFLOW_HISTORICAL_CACHE_FILE = "financeflow_historical_cache.json" #store each days FinanceFlowAPI called data in a cache file so we can use it as a historical data repo display for us, uk, ger and fra! clever isnt it?
+#there are debug endpoints below for us to validate that we received data
 
 def _load_bbg_last_good_cache():
     if os.path.exists(BBG_LAST_GOOD_CACHE_FILE):
