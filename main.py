@@ -56,19 +56,19 @@ us_historical_series = {
 }
 
 
-TODAY_BLOOMBERG_CACHE = {}   # Bloomberg + FinanceFlow fallback
-TODAY_API_CACHE = {}         # FinanceFlow only (toggle forced)
+TODAY_BLOOMBERG_CACHE = {}   # Bloomberg Data Scraped - default toggle on
+TODAY_FINANCEFLOWAPI_CACHE = {}         # FinanceFlow only (toggle forced)
 _bloomberg_cache_date = None  # Tracks which calendar date TODAY_BLOOMBERG_CACHE was populated for
 
-LAST_GOOD_CACHE_FILE = "bloomberg_last_good.json"
-HISTORICAL_CACHE_FILE = "historical_yields_cache.json"
+BBG_LAST_GOOD_CACHE_FILE = "bbg_last_good_cache.json"
+BBG_HISTORICAL_CACHE_FILE = "bbg_historical_cache.json"
 FINANCEFLOW_HISTORICAL_CACHE_FILE = "financeflow_historical_cache.json"
 
 
 def _load_last_good_cache():
-    if os.path.exists(LAST_GOOD_CACHE_FILE):
+    if os.path.exists(BBG_LAST_GOOD_CACHE_FILE):
         try:
-            with open(LAST_GOOD_CACHE_FILE) as f:
+            with open(BBG_LAST_GOOD_CACHE_FILE) as f:
                 return json.load(f)
         except Exception:
             pass
@@ -77,16 +77,16 @@ def _load_last_good_cache():
 
 def _save_last_good_cache(cache):
     try:
-        with open(LAST_GOOD_CACHE_FILE, "w") as f:
+        with open(BBG_LAST_GOOD_CACHE_FILE, "w") as f:
             json.dump(cache, f)
     except Exception:
         pass
 
 
 def _load_historical_cache():
-    if os.path.exists(HISTORICAL_CACHE_FILE):
+    if os.path.exists(BBG_HISTORICAL_CACHE_FILE):
         try:
-            with open(HISTORICAL_CACHE_FILE) as f:
+            with open(BBG_HISTORICAL_CACHE_FILE) as f:
                 return json.load(f)
         except Exception:
             pass
@@ -95,7 +95,7 @@ def _load_historical_cache():
 
 def _save_historical_cache(cache):
     try:
-        with open(HISTORICAL_CACHE_FILE, "w") as f:
+        with open(BBG_HISTORICAL_CACHE_FILE, "w") as f:
             json.dump(cache, f, indent=2)
     except Exception:
         pass
@@ -265,7 +265,7 @@ def debug_status():
         "bloomberg_cache_date": _bloomberg_cache_date,
         "bloomberg": bloomberg,
         "financeflow_eod": financeflow_eod,
-        "today_api_cache_countries": list(TODAY_API_CACHE.keys()),
+        "today_api_cache_countries": list(TODAY_FINANCEFLOWAPI_CACHE.keys()),
     }
 
 
@@ -349,11 +349,11 @@ def fetch_financeflow(country, tenor):
 
 def _populate_api_cache(country):
     """Fetch all tenors for a country from FinanceFlow in parallel and cache."""
-    if country in TODAY_API_CACHE:
+    if country in TODAY_FINANCEFLOWAPI_CACHE:
         return
     with ThreadPoolExecutor(max_workers=len(tenors)) as pool:
         futures = {pool.submit(fetch_financeflow, country, t): t for t in tenors}
-        TODAY_API_CACHE[country] = {
+        TODAY_FINANCEFLOWAPI_CACHE[country] = {
             futures[f]: f.result() for f in as_completed(futures)
         }
 
@@ -607,7 +607,7 @@ def get_today_yields(country, use_api=False):
     """
     if use_api:
         _populate_api_cache(country)
-        return TODAY_API_CACHE[country]
+        return TODAY_FINANCEFLOWAPI_CACHE[country]
 
     if country not in TODAY_BLOOMBERG_CACHE:
         # Single-country fallback (e.g. called outside a batch context)
