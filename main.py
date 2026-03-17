@@ -164,6 +164,111 @@ def debug_scrape():
     return result
 
 
+@app.get("/debug/bloomberg-cache")
+def debug_bloomberg_cache():
+    """Return TODAY_BLOOMBERG_CACHE: which countries are cached today and what source each tenor came from."""
+    summary = {}
+    for country, tenor_data in TODAY_BLOOMBERG_CACHE.items():
+        summary[country] = {
+            t: {"value": v["value"], "source": v["source"]} if v else None
+            for t, v in tenor_data.items()
+        }
+    return {
+        "cache_date": _bloomberg_cache_date,
+        "today": dt_date.today().isoformat(),
+        "data": summary,
+    }
+
+
+@app.get("/debug/bloomberg-last-good")
+def debug_bloomberg_last_good():
+    """Return the persisted last-good Bloomberg values with their timestamps."""
+    return BLOOMBERG_LAST_GOOD_CACHE
+
+
+@app.get("/debug/financeflow-cache")
+def debug_financeflow_cache():
+    """Return the in-memory FinanceFlow historical cache."""
+    return FINANCEFLOW_HISTORICAL_CACHE
+
+
+@app.get("/debug/financeflow-live")
+def debug_financeflow_live():
+    """Fire live FinanceFlow requests for all countries/tenors right now (no caching) to verify the API is responding."""
+    results = {}
+    with ThreadPoolExecutor(max_workers=len(ALL_COUNTRIES) * len(tenors)) as pool:
+        futures = {
+            pool.submit(fetch_financeflow, country, t): (country, t)
+            for country in ALL_COUNTRIES
+            for t in tenors
+        }
+        for future in as_completed(futures):
+            country, t = futures[future]
+            result = future.result()
+            results.setdefault(country, {})[t] = result
+    return results
+
+
+@app.get("/debug/eod-schedule")
+def debug_eod_schedule():
+    """Show EOD schedule, current UTC time, and whether each country's data for today is already captured."""
+    now = datetime.utcnow()
+    today = now.date().isoformat()
+    schedule = {}
+    for country, (h, m) in EOD_SCHEDULE_UTC.items():
+        schedule[country] = {
+            "scheduled_utc": f"{h:02d}:{m:02d}",
+            "past_scheduled_time": (now.hour, now.minute) >= (h, m),
+            "today_captured": today in FINANCEFLOW_HISTORICAL_CACHE.get(country, {}),
+            "tenors_captured": list(FINANCEFLOW_HISTORICAL_CACHE.get(country, {}).get(today, {}).keys()),
+        }
+    return {
+        "current_utc": now.strftime("%Y-%m-%d %H:%M:%S"),
+        "today": today,
+        "schedule": schedule,
+    }
+
+
+@app.get("/debug/status")
+def debug_status():
+    """Single health overview: Bloomberg cache state, FinanceFlow EOD coverage, and API cache state."""
+    now = datetime.utcnow()
+    today = now.date().isoformat()
+
+    bloomberg = {}
+    for country in ALL_COUNTRIES:
+        tenor_data = TODAY_BLOOMBERG_CACHE.get(country, {})
+        live = [t for t, v in tenor_data.items() if v and v.get("source") == "Bloomberg Rates"]
+        fallback = [t for t, v in tenor_data.items() if v and v.get("source", "").startswith("Bloomberg (Last")]
+        missing = [t for t in tenors if not tenor_data.get(t)]
+        bloomberg[country] = {
+            "in_today_cache": country in TODAY_BLOOMBERG_CACHE,
+            "live_tenors": live,
+            "fallback_tenors": fallback,
+            "missing_tenors": missing,
+        }
+
+    financeflow_eod = {}
+    for country, (h, m) in EOD_SCHEDULE_UTC.items():
+        today_data = FINANCEFLOW_HISTORICAL_CACHE.get(country, {}).get(today, {})
+        financeflow_eod[country] = {
+            "scheduled_utc": f"{h:02d}:{m:02d}",
+            "past_scheduled_time": (now.hour, now.minute) >= (h, m),
+            "today_captured": bool(today_data),
+            "tenors_captured": sorted(today_data.keys()),
+            "tenors_missing": [t for t in tenors if t not in today_data],
+        }
+
+    return {
+        "current_utc": now.strftime("%Y-%m-%d %H:%M:%S"),
+        "today": today,
+        "bloomberg_cache_date": _bloomberg_cache_date,
+        "bloomberg": bloomberg,
+        "financeflow_eod": financeflow_eod,
+        "today_api_cache_countries": list(TODAY_API_CACHE.keys()),
+    }
+
+
 @app.get("/debug/financeflow-eod")
 def debug_financeflow_eod():
     """Manually trigger the FinanceFlow EOD fetch for all countries."""
