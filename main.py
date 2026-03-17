@@ -17,13 +17,13 @@ def _prewarm():
     """Populate both caches for all countries at startup in the background."""
     ensure_bloomberg_cached(ALL_COUNTRIES)
     for country in ALL_COUNTRIES:
-        _populate_api_cache(country)
+        _populate_financeflow_api_cache(country)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     threading.Thread(target=_prewarm, daemon=True).start()
-    threading.Thread(target=_eod_scheduler, daemon=True).start()
+    threading.Thread(target=_financeflow_eod_scheduler, daemon=True).start()
     yield
 
 
@@ -120,15 +120,15 @@ def _save_financeflow_historical_cache(cache):
 
 
 BLOOMBERG_LAST_GOOD_CACHE = _load_bbg_last_good_cache()  # {country: {tenor: {value, timestamp}}}
-HISTORICAL_YIELDS_CACHE = _load_bbg_historical_cache()   # {country: {date: {tenor: {value, source}}}}
+BBG_HISTORICAL_YIELDS_CACHE = _load_bbg_historical_cache()   # {country: {date: {tenor: {value, source}}}}
 FINANCEFLOW_HISTORICAL_CACHE = _load_financeflow_historical_cache()  # {country: {date: {tenor: {value, source}}}}
 
 
-def _seed_historical_from_last_good():
+def _seed_bbg_historical_from_last_good():
     """
     Seed the historical cache from bloomberg_last_good.json on startup.
     Each entry in last_good carries a timestamp — extract the date from it and
-    populate HISTORICAL_YIELDS_CACHE so we always have the most recently scraped
+    populate BBG_HISTORICAL_YIELDS_CACHE so we always have the most recently scraped
     data available for historical queries even if historical_yields_cache.json
     was freshly initialised or deleted.
     """
@@ -139,17 +139,17 @@ def _seed_historical_from_last_good():
                 continue
             date_str = entry["timestamp"][:10]  # YYYY-MM-DD
             # Don't overwrite if we already have data for this date/tenor
-            if not HISTORICAL_YIELDS_CACHE.get(country, {}).get(date_str, {}).get(tenor):
-                HISTORICAL_YIELDS_CACHE.setdefault(country, {}).setdefault(date_str, {})[tenor] = {
+            if not BBG_HISTORICAL_YIELDS_CACHE.get(country, {}).get(date_str, {}).get(tenor):
+                BBG_HISTORICAL_YIELDS_CACHE.setdefault(country, {}).setdefault(date_str, {})[tenor] = {
                     "value": entry["value"],
                     "source": "BBG Cache",
                 }
                 updated = True
     if updated:
-        _save_bbg_historical_cache(HISTORICAL_YIELDS_CACHE)
+        _save_bbg_historical_cache(BBG_HISTORICAL_YIELDS_CACHE)
 
 
-_seed_historical_from_last_good()
+_seed_bbg_historical_from_last_good()
 
 
 @app.get("/")
@@ -157,7 +157,7 @@ def root():
     return FileResponse("frontend/index.html")
 
 
-@app.get("/debug/scrape")
+@app.get("/debug/bbg-scrape")
 def debug_scrape():
     """Scrape all three Bloomberg pages in one session and return raw results."""
     result = scrape_bloomberg_batch(["united_states", "united_kingdom", "germany"])
@@ -209,13 +209,13 @@ def debug_financeflow_live():
     return results
 
 
-@app.get("/debug/eod-schedule")
+@app.get("/debug/financeflow-eod-schedule")
 def debug_eod_schedule():
     """Show EOD schedule, current UTC time, and whether each country's data for today is already captured."""
     now = datetime.utcnow()
     today = now.date().isoformat()
     schedule = {}
-    for country, (h, m) in EOD_SCHEDULE_UTC.items():
+    for country, (h, m) in FINANCEFLOW_EOD_SCHEDULE_UTC.items():
         schedule[country] = {
             "scheduled_utc": f"{h:02d}:{m:02d}",
             "past_scheduled_time": (now.hour, now.minute) >= (h, m),
@@ -249,7 +249,7 @@ def debug_status():
         }
 
     financeflow_eod = {}
-    for country, (h, m) in EOD_SCHEDULE_UTC.items():
+    for country, (h, m) in FINANCEFLOW_EOD_SCHEDULE_UTC.items():
         today_data = FINANCEFLOW_HISTORICAL_CACHE.get(country, {}).get(today, {})
         financeflow_eod[country] = {
             "scheduled_utc": f"{h:02d}:{m:02d}",
@@ -300,7 +300,7 @@ def resolve_countries(country, selected):
 
 # ---------------- FRED ----------------
 
-def fetch_us_historical(tenor, start=None, end=None):
+def fetch_fred_us_historical(tenor, start=None, end=None):
     code = us_historical_series[tenor]
 
     url = (
@@ -347,7 +347,7 @@ def fetch_financeflow(country, tenor):
         return None
 
 
-def _populate_api_cache(country):
+def _populate_financeflow_api_cache(country):
     """Fetch all tenors for a country from FinanceFlow in parallel and cache."""
     if country in TODAY_FINANCEFLOWAPI_CACHE:
         return
@@ -360,7 +360,7 @@ def _populate_api_cache(country):
 
 # Per-country EOD snapshot times (UTC). UK/GER/FR markets close ~16:00-16:30 UTC,
 # US Treasuries close ~22:00 UTC (5pm EST), so we capture US 15 min after close.
-EOD_SCHEDULE_UTC = {
+FINANCEFLOW_EOD_SCHEDULE_UTC = {
     "united_kingdom": (21,  0),
     "germany":        (21,  5),
     "france":         (21, 10),
@@ -389,7 +389,7 @@ def _fetch_and_store_financeflow_eod_country(country):
     print(f"_fetch_and_store_financeflow_eod: completed {country} for {today_str}, updated={updated}")
 
 
-def _eod_scheduler():
+def _financeflow_eod_scheduler():
     """Background thread that fires per-country FinanceFlow EOD fetches at their scheduled UTC times.
     Catch-up logic: on startup, if it is already past a country's scheduled time and that country's
     data for today is absent, runs immediately so a server restart never skips a day.
@@ -399,7 +399,7 @@ def _eod_scheduler():
     while True:
         now = datetime.utcnow()
         today = now.date().isoformat()
-        for country, (sched_hour, sched_min) in EOD_SCHEDULE_UTC.items():
+        for country, (sched_hour, sched_min) in FINANCEFLOW_EOD_SCHEDULE_UTC.items():
             already_ran = last_run_dates[country] == today
             if already_ran:
                 continue
@@ -413,7 +413,7 @@ def _eod_scheduler():
                 try:
                     _fetch_and_store_financeflow_eod_country(country)
                 except Exception as e:
-                    print(f"_eod_scheduler error ({country}): {e}")
+                    print(f"_financeflow_eod_scheduler error ({country}): {e}")
         time.sleep(30)
 
 
@@ -529,7 +529,7 @@ def _process_bloomberg_batch(batch):
                 }
                 cache_updated = True
                 # Save to historical cache so non-US countries build up a repository
-                HISTORICAL_YIELDS_CACHE.setdefault(country, {}).setdefault(today_str, {})[t] = {
+                BBG_HISTORICAL_YIELDS_CACHE.setdefault(country, {}).setdefault(today_str, {})[t] = {
                     "value": v,
                     "source": "BBG Cache",
                 }
@@ -592,7 +592,7 @@ def ensure_bloomberg_cached(countries):
     if cache_updated:
         _save_bbg_last_good_cache(BLOOMBERG_LAST_GOOD_CACHE)
     if historical_updated:
-        _save_bbg_historical_cache(HISTORICAL_YIELDS_CACHE)
+        _save_bbg_historical_cache(BBG_HISTORICAL_YIELDS_CACHE)
 
 
 # ---------------- Today's yields (Bloomberg default, FinanceFlow fallback/override) ----------------
@@ -606,7 +606,7 @@ def get_today_yields(country, use_api=False):
     Results are cached per-source for the lifetime of the server process.
     """
     if use_api:
-        _populate_api_cache(country)
+        _populate_financeflow_api_cache(country)
         return TODAY_FINANCEFLOWAPI_CACHE[country]
 
     if country not in TODAY_BLOOMBERG_CACHE:
@@ -621,7 +621,7 @@ def _get_historical_cache(force_scrape: bool) -> dict:
     Bloomberg mode (force_scrape=True)  → BBG Cache (historical_yields_cache.json)
     FinanceFlow mode (force_scrape=False) → FinanceFlow Cache (financeflow_historical_cache.json)
     """
-    return HISTORICAL_YIELDS_CACHE if force_scrape else FINANCEFLOW_HISTORICAL_CACHE
+    return BBG_HISTORICAL_YIELDS_CACHE if force_scrape else FINANCEFLOW_HISTORICAL_CACHE
 
 
 # ---------------- endpoint ----------------
@@ -668,7 +668,7 @@ def get_yield_curve(
             rs, re = min(non_today), max(non_today)
 
             with ThreadPoolExecutor(max_workers=len(tenors)) as pool:
-                for tenor_data in pool.map(partial(fetch_us_historical, start=rs, end=re), tenors):
+                for tenor_data in pool.map(partial(fetch_fred_us_historical, start=rs, end=re), tenors):
                     for d, vals in tenor_data.items():
                         us_cache.setdefault(d, {}).update(vals)
 
@@ -721,7 +721,7 @@ def get_yield_curve(
                 yields = {t: today_yields.get(t) for t in tenors}
             elif c == "united_states":
                 with ThreadPoolExecutor(max_workers=len(tenors)) as pool:
-                    fred_results = pool.map(partial(fetch_us_historical, start=date, end=date), tenors)
+                    fred_results = pool.map(partial(fetch_fred_us_historical, start=date, end=date), tenors)
                 yields = {}
                 for t, data in zip(tenors, fred_results):
                     val = list(data.values())[0][t] if data else None
@@ -752,7 +752,7 @@ def get_yield_curve(
             rs, re = min(non_today), max(non_today)
 
             with ThreadPoolExecutor(max_workers=len(tenors)) as pool:
-                for tenor_data in pool.map(partial(fetch_us_historical, start=rs, end=re), tenors):
+                for tenor_data in pool.map(partial(fetch_fred_us_historical, start=rs, end=re), tenors):
                     for d, vals in tenor_data.items():
                         us_cache.setdefault(d, {}).update(vals)
 
