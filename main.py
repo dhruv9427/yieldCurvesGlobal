@@ -61,6 +61,7 @@ TODAY_FINANCEFLOWAPI_CACHE = {}         # FinanceFlow only (toggle forced)
 _bloomberg_cache_date = None  # Tracks which calendar date TODAY_BLOOMBERG_CACHE was populated for
 _bloomberg_last_scrape_time = {}  # {country: datetime} last scrape attempt, for fallback retry TTL
 BLOOMBERG_RETRY_TTL_SECONDS = 1800  # retry fallback-only countries every 30 min
+_bloomberg_scrape_rotation = 0  # increments each background scrape to rotate country order
 _financeflow_api_cache_date = None    # Tracks which calendar date the FinanceFlow cache was last refreshed
 _financeflow_last_refresh_time = {}   # {country: datetime} last refresh time, for intraday TTL
 FINANCEFLOW_RETRY_TTL_SECONDS = 1800  # refresh FinanceFlow data every 30 min intraday
@@ -459,6 +460,7 @@ BLOOMBERG_URLS = {
     "united_kingdom": "https://www.bloomberg.com/markets/rates-bonds/government-bonds/uk",
     "germany":        "https://www.bloomberg.com/markets/rates-bonds/government-bonds/germany",
 }
+BLOOMBERG_COUNTRIES = list(BLOOMBERG_URLS.keys())  # fixed rotation order: US, UK, GER
 
 BLOOMBERG_MAPPINGS = {
     "united_states": {
@@ -654,8 +656,13 @@ def ensure_bloomberg_cached(countries):
         _bloomberg_last_scrape_time[c] = now
     # Stale-while-revalidate: return existing fallback data immediately
     if background_retry:
-        print(f"ensure_bloomberg_cached: background retry for {background_retry}")
-        threading.Thread(target=_do_bloomberg_scrape, args=(background_retry,), daemon=True).start()
+        global _bloomberg_scrape_rotation
+        n = len(BLOOMBERG_COUNTRIES)
+        rotated_all = BLOOMBERG_COUNTRIES[_bloomberg_scrape_rotation % n:] + BLOOMBERG_COUNTRIES[:_bloomberg_scrape_rotation % n]
+        rotated_retry = [c for c in rotated_all if c in background_retry]
+        _bloomberg_scrape_rotation += 1
+        print(f"ensure_bloomberg_cached: background retry for {rotated_retry}")
+        threading.Thread(target=_do_bloomberg_scrape, args=(rotated_retry,), daemon=True).start()
     if not must_scrape:
         return
 
