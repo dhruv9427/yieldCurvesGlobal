@@ -24,6 +24,7 @@ def _prewarm():
 async def lifespan(app: FastAPI):
     threading.Thread(target=_prewarm, daemon=True).start()
     threading.Thread(target=_financeflow_eod_scheduler, daemon=True).start()
+    threading.Thread(target=_bloomberg_background_scheduler, daemon=True).start()
     yield
 
 
@@ -61,7 +62,9 @@ TODAY_FINANCEFLOWAPI_CACHE = {}         # FinanceFlow only (toggle forced)
 _bloomberg_cache_date = None  # Tracks which calendar date TODAY_BLOOMBERG_CACHE was populated for
 _bloomberg_last_scrape_time = {}  # {country: datetime} last scrape attempt, for fallback retry TTL
 BLOOMBERG_RETRY_TTL_SECONDS = 1800  # retry fallback-only countries every 30 min
-_bloomberg_scrape_rotation = 0  # increments each background scrape to rotate country order
+_bloomberg_scrape_rotation = 0     # increments each request-driven background scrape to rotate country order
+_bloomberg_bg_rotation = 0         # increments each scheduled background scrape to rotate country order
+BLOOMBERG_BG_SCHEDULER_INTERVAL = 3 * 60 * 60  # scrape all Bloomberg countries every 3 hours
 _financeflow_api_cache_date = None    # Tracks which calendar date the FinanceFlow cache was last refreshed
 _financeflow_last_refresh_time = {}   # {country: datetime} last refresh time, for intraday TTL
 FINANCEFLOW_RETRY_TTL_SECONDS = 1800  # refresh FinanceFlow data every 30 min intraday
@@ -602,6 +605,32 @@ def _do_bloomberg_scrape(countries):
         _save_bbg_last_good_cache(BLOOMBERG_LAST_GOOD_CACHE)
     if hu:
         _save_bbg_historical_cache(BBG_HISTORICAL_YIELDS_CACHE)
+
+
+def _bloomberg_background_scheduler():
+    """Background thread that scrapes all Bloomberg countries every 3 hours.
+    Rotates country order each run so each country gets the first-position
+    advantage on a fixed cycle: [US,UK,GER] → [UK,GER,US] → [GER,US,UK] → repeat.
+    Stamps _bloomberg_last_scrape_time before scraping so the request-driven
+    retry does not fire a duplicate scrape immediately after the scheduler runs.
+    Waits one full interval before the first run since prewarm already scraped at startup.
+    """
+    import time
+    global _bloomberg_bg_rotation
+    time.sleep(BLOOMBERG_BG_SCHEDULER_INTERVAL)
+    while True:
+        n = len(BLOOMBERG_COUNTRIES)
+        rotated = BLOOMBERG_COUNTRIES[_bloomberg_bg_rotation % n:] + BLOOMBERG_COUNTRIES[:_bloomberg_bg_rotation % n]
+        _bloomberg_bg_rotation += 1
+        print(f"_bloomberg_background_scheduler: scraping {rotated}")
+        now = datetime.now()
+        for c in rotated:
+            _bloomberg_last_scrape_time[c] = now
+        try:
+            _do_bloomberg_scrape(rotated)
+        except Exception as e:
+            print(f"_bloomberg_background_scheduler error: {e}")
+        time.sleep(BLOOMBERG_BG_SCHEDULER_INTERVAL)
 
 
 def ensure_bloomberg_cached(countries):
