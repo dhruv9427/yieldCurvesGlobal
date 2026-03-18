@@ -231,17 +231,20 @@ const chartDiv         = document.getElementById('chart');
 const tableBody        = document.querySelector('#yield-table tbody');
 
 let forceBloomberg = true;
+let autoRefreshInterval = null;
 
 let lastChart = null; // { data, mode, selectedCountries }
-const responseCache = new Map(); // url → parsed API response
+const responseCache = new Map(); // url → { data, ts }
+const CACHE_TTL_TODAY_MS      = 5  * 60 * 1000; // 5 min  — URL includes today's date
+const CACHE_TTL_HISTORICAL_MS = 60 * 60 * 1000; // 60 min — purely historical URL
 
 function getSelectedTenors()    { return Array.from(tenorCheckboxes).filter(cb => cb.checked).map(cb => cb.value); }
 function getSelectedCountries() {
     const checked = document.querySelector('#country-dropdown input[name=country]:checked');
     return checked ? [checked.value] : [];
 }
-function todayStr()     { return new Date().toISOString().split('T')[0]; }
-function yesterdayStr() { const d = new Date(); d.setDate(d.getDate()-1); return d.toISOString().split('T')[0]; }
+function todayStr()     { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
+function yesterdayStr() { const d = new Date(); d.setDate(d.getDate()-1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
 function isDark()    { return document.documentElement.classList.contains('dark'); }
 
 // ── Country overlay ──────────────────────────────────────────────
@@ -255,6 +258,12 @@ bbToggle.addEventListener("click", () => {
   forceBloomberg = !forceBloomberg;
   bbToggle.classList.toggle("bb-on");
   responseCache.clear();
+  if (!forceBloomberg) {
+    autoRefreshInterval = setInterval(() => { responseCache.clear(); fetchData(); }, 5 * 60 * 1000);
+  } else {
+    clearInterval(autoRefreshInterval);
+    autoRefreshInterval = null;
+  }
   fetchData();
 });
 
@@ -325,15 +334,17 @@ async function fetchData() {
         if(mode === 'country'){
             url += `&start=${start||todayStr()}&end=${end||todayStr()}&view=country`;
         } else {
-            const s = start || new Date(Date.now()-7*24*60*60*1000).toISOString().split('T')[0];
+            const s = start || (() => { const d = new Date(Date.now()-7*24*60*60*1000); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; })();
             url += `&start=${s}&end=${end||todayStr()}`;
         }
 
         const cached = responseCache.get(url);
-        const raw = cached !== undefined
-            ? cached
+        const ttl = url.includes(todayStr()) ? CACHE_TTL_TODAY_MS : CACHE_TTL_HISTORICAL_MS;
+        const cacheValid = cached !== undefined && (Date.now() - cached.ts) < ttl;
+        const raw = cacheValid
+            ? cached.data
             : await fetch(url).then(r => { if(!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); });
-        if (cached === undefined) responseCache.set(url, raw);
+        if (!cacheValid) responseCache.set(url, { data: raw, ts: Date.now() });
         console.log("API response:", raw);
         if(raw.error) { showError(raw.error); return; }
 

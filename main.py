@@ -59,6 +59,11 @@ us_historical_series = {
 TODAY_BLOOMBERG_CACHE = {}   # Bloomberg Data Scraped - default toggle on
 TODAY_FINANCEFLOWAPI_CACHE = {}         # FinanceFlow only (toggle forced)
 _bloomberg_cache_date = None  # Tracks which calendar date TODAY_BLOOMBERG_CACHE was populated for
+_bloomberg_last_scrape_time = {}  # {country: datetime} last scrape attempt, for fallback retry TTL
+BLOOMBERG_RETRY_TTL_SECONDS = 1800  # retry fallback-only countries every 30 min
+_financeflow_api_cache_date = None    # Tracks which calendar date the FinanceFlow cache was last refreshed
+_financeflow_last_refresh_time = {}   # {country: datetime} last refresh time, for intraday TTL
+FINANCEFLOW_RETRY_TTL_SECONDS = 1800  # refresh FinanceFlow data every 30 min intraday
 
 BBG_LAST_GOOD_CACHE_FILE = "bbg_last_good_cache.json" #if we dont have live scraped data lets display the last good result from bbg that we stored
 BBG_HISTORICAL_CACHE_FILE = "bbg_historical_cache.json" #store each days BBG live scraped data in a cache file so we can use it as a historical data repo display - clever isnt it? useful for uk, germany (us at least has FRED)
@@ -347,15 +352,45 @@ def fetch_financeflow(country, tenor):
         return None
 
 
-def _populate_financeflow_api_cache(country):
-    """Fetch all tenors for a country from FinanceFlow in parallel and cache."""
-    if country in TODAY_FINANCEFLOWAPI_CACHE:
-        return
+def _refresh_financeflow_cache(country):
+    """Fetch all tenors for a country from FinanceFlow and update the in-memory cache."""
     with ThreadPoolExecutor(max_workers=len(tenors)) as pool:
         futures = {pool.submit(fetch_financeflow, country, t): t for t in tenors}
         TODAY_FINANCEFLOWAPI_CACHE[country] = {
             futures[f]: f.result() for f in as_completed(futures)
         }
+
+
+def _populate_financeflow_api_cache(country):
+    """Ensure today's FinanceFlow data is cached for the given country.
+
+    Intraday TTL (stale-while-revalidate):
+      - No data at all → block until fetched (first startup only).
+      - Data exists but TTL expired → return stale immediately, refresh in
+        background so the next request gets updated yields.
+      - Data exists and within TTL → return immediately, no API calls.
+    Timestamp is stamped before spawning the background thread to prevent
+    concurrent requests from queuing duplicate fetches.
+    """
+    global _financeflow_api_cache_date, _financeflow_last_refresh_time
+    today = dt_date.today().isoformat()
+    if _financeflow_api_cache_date != today:
+        _financeflow_api_cache_date = today
+        _financeflow_last_refresh_time = {}  # new day — all countries need a refresh
+    now = datetime.now()
+    last = _financeflow_last_refresh_time.get(country)
+    ttl_expired = last is None or (now - last).total_seconds() > FINANCEFLOW_RETRY_TTL_SECONDS
+    if not ttl_expired:
+        return  # still fresh within TTL
+    # Stamp before fetching to prevent concurrent duplicate fetches
+    _financeflow_last_refresh_time[country] = now
+    if country in TODAY_FINANCEFLOWAPI_CACHE:
+        # Stale data available — refresh in background, return immediately
+        print(f"_populate_financeflow_api_cache: background refresh for {country}")
+        threading.Thread(target=_refresh_financeflow_cache, args=(country,), daemon=True).start()
+    else:
+        # No data at all — must block
+        _refresh_financeflow_cache(country)
 
 
 # Per-country EOD snapshot times (UTC). UK/GER/FR markets close ~16:00-16:30 UTC,
@@ -557,29 +592,79 @@ def _process_bloomberg_batch(batch):
     return cache_updated, historical_updated
 
 
+def _do_bloomberg_scrape(countries):
+    """Scrape Bloomberg for the given countries and merge results into caches."""
+    batch = scrape_bloomberg_batch(countries)
+    cu, hu = _process_bloomberg_batch(batch)
+    if cu:
+        _save_bbg_last_good_cache(BLOOMBERG_LAST_GOOD_CACHE)
+    if hu:
+        _save_bbg_historical_cache(BBG_HISTORICAL_YIELDS_CACHE)
+
+
 def ensure_bloomberg_cached(countries):
     """Populate TODAY_BLOOMBERG_CACHE for any countries not yet scraped.
 
-    Rotates call order across up to len(needed) rounds so each country gets a
-    chance to be first in the batch (Bloomberg tends to return data for the
-    first caller and block subsequent ones). Short-circuits as soon as every
-    country has live data, so performance is unaffected in the happy path.
+    Rotates call order across up to len(must_scrape) rounds so each country
+    gets a chance to be first in the batch (Bloomberg tends to return data for
+    the first caller and block subsequent ones). Short-circuits as soon as
+    every country has live data, so performance is unaffected in the happy path.
+
+    Intraday retry (stale-while-revalidate):
+      - No cache entry and no last-good data → block until scraped (first ever startup).
+      - No cache entry but last-good data exists → pre-populate from last-good,
+        then treat as fallback-only and refresh in the background.
+      - Fallback-only, TTL expired → return stale data immediately, re-scrape
+        in the background so the next request gets fresh data.
+      - Live data present → never re-scraped.
+    The scrape timestamp is stamped before the scrape starts, so concurrent
+    requests for the same country never queue duplicate scrapes.
     """
-    global TODAY_BLOOMBERG_CACHE, _bloomberg_cache_date
+    global TODAY_BLOOMBERG_CACHE, _bloomberg_cache_date, _bloomberg_last_scrape_time
     today = dt_date.today().isoformat()
     if _bloomberg_cache_date != today:
-        TODAY_BLOOMBERG_CACHE = {}
         _bloomberg_cache_date = today
-    needed = [c for c in countries if c not in TODAY_BLOOMBERG_CACHE]
-    if not needed:
+        _bloomberg_last_scrape_time.clear()
+        # Pre-populate from last-good cache so stale data is available immediately.
+        # Countries with no last-good entry remain absent and will block (must_scrape).
+        new_cache = {}
+        for c, tenor_data in BLOOMBERG_LAST_GOOD_CACHE.items():
+            vals = {}
+            for t in tenors:
+                last = tenor_data.get(t)
+                if last:
+                    vals[t] = {"value": last["value"], "source": f"Bloomberg (Last Received: {last['timestamp']})"}
+                else:
+                    vals[t] = None
+            if any(v is not None for v in vals.values()):
+                new_cache[c] = vals
+        TODAY_BLOOMBERG_CACHE = new_cache
+    now = datetime.now()
+    must_scrape = []    # no cache entry — block the request
+    background_retry = []  # fallback-only, TTL expired — stale-while-revalidate
+    for c in countries:
+        if c not in TODAY_BLOOMBERG_CACHE:
+            must_scrape.append(c)
+        elif not _has_live_bloomberg_data(c):
+            last = _bloomberg_last_scrape_time.get(c)
+            if last is None or (now - last).total_seconds() > BLOOMBERG_RETRY_TTL_SECONDS:
+                background_retry.append(c)
+    # Stamp before scraping to prevent concurrent duplicate scrapes
+    for c in must_scrape + background_retry:
+        _bloomberg_last_scrape_time[c] = now
+    # Stale-while-revalidate: return existing fallback data immediately
+    if background_retry:
+        print(f"ensure_bloomberg_cached: background retry for {background_retry}")
+        threading.Thread(target=_do_bloomberg_scrape, args=(background_retry,), daemon=True).start()
+    if not must_scrape:
         return
 
     cache_updated = False
     historical_updated = False
-    n = len(needed)
+    n = len(must_scrape)
     for rotation in range(n):
         # Countries still lacking live Bloomberg data, in rotated order
-        rotated = needed[rotation:] + needed[:rotation]
+        rotated = must_scrape[rotation:] + must_scrape[:rotation]
         to_scrape = [c for c in rotated if not _has_live_bloomberg_data(c)]
         if not to_scrape:
             break
@@ -607,7 +692,7 @@ def get_today_yields(country, use_api=False):
     """
     if use_api:
         _populate_financeflow_api_cache(country)
-        return TODAY_FINANCEFLOWAPI_CACHE[country]
+        return TODAY_FINANCEFLOWAPI_CACHE.get(country, {})
 
     if country not in TODAY_BLOOMBERG_CACHE:
         # Single-country fallback (e.g. called outside a batch context)
