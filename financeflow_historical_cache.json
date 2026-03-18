@@ -1,0 +1,94 @@
+{
+  "united_kingdom": {
+    "2026-03-18": {
+      "3M": {
+        "value": 3.87,
+        "source": "FinanceFlow Cache"
+      },
+      "10Y": {
+        "value": 4.68,
+        "source": "FinanceFlow Cache"
+      },
+      "6M": {
+        "value": 3.93,
+        "source": "FinanceFlow Cache"
+      },
+      "2Y": {
+        "value": 4.12,
+        "source": "FinanceFlow Cache"
+      },
+      "1M": {
+        "value": 3.84,
+        "source": "FinanceFlow Cache"
+      },
+      "30Y": {
+        "value": 5.38,
+        "source": "FinanceFlow Cache"
+      },
+      "5Y": {
+        "value": 4.27,
+        "source": "FinanceFlow Cache"
+      }
+    }
+  },
+  "germany": {
+    "2026-03-18": {
+      "2Y": {
+        "value": 2.45,
+        "source": "FinanceFlow Cache"
+      },
+      "10Y": {
+        "value": 2.9596,
+        "source": "FinanceFlow Cache"
+      },
+      "3M": {
+        "value": 1.83,
+        "source": "FinanceFlow Cache"
+      },
+      "30Y": {
+        "value": 3.48,
+        "source": "FinanceFlow Cache"
+      },
+      "5Y": {
+        "value": 2.62,
+        "source": "FinanceFlow Cache"
+      },
+      "6M": {
+        "value": 2.06,
+        "source": "FinanceFlow Cache"
+      }
+    }
+  },
+  "france": {
+    "2026-03-18": {
+      "5Y": {
+        "value": 2.98,
+        "source": "FinanceFlow Cache"
+      },
+      "6M": {
+        "value": 2.27,
+        "source": "FinanceFlow Cache"
+      },
+      "10Y": {
+        "value": 3.6035,
+        "source": "FinanceFlow Cache"
+      },
+      "3M": {
+        "value": 2.1,
+        "source": "FinanceFlow Cache"
+      },
+      "1M": {
+        "value": 2.01,
+        "source": "FinanceFlow Cache"
+      },
+      "2Y": {
+        "value": 2.57,
+        "source": "FinanceFlow Cache"
+      },
+      "30Y": {
+        "value": 4.45,
+        "source": "FinanceFlow Cache"
+      }
+    }
+  }
+}

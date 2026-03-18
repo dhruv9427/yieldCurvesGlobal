@@ -82,6 +82,7 @@
           <option value="country">Country</option>
           <option value="tenor">Tenor</option>
           <option value="spread">Spread</option>
+          <option value="cod">Live CoD</option>
         </select>
       </div>
 
@@ -108,19 +109,19 @@
       </div>
 
       <!-- From -->
-      <div class="flex flex-col gap-1.5">
+      <div id="ctrl-from" class="flex flex-col gap-1.5">
         <label class="text-xs font-semibold text-gray-400 dark:text-slate-500 uppercase tracking-wider">From</label>
         <input type="date" id="start_date" class="px-3 py-2 rounded-lg border border-gray-200 dark:border-navy-600 bg-gray-50 dark:bg-navy-900 text-gray-900 dark:text-slate-100 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
       </div>
 
       <!-- To -->
-      <div class="flex flex-col gap-1.5">
+      <div id="ctrl-to" class="flex flex-col gap-1.5">
         <label class="text-xs font-semibold text-gray-400 dark:text-slate-500 uppercase tracking-wider">To</label>
         <input type="date" id="end_date" class="px-3 py-2 rounded-lg border border-gray-200 dark:border-navy-600 bg-gray-50 dark:bg-navy-900 text-gray-900 dark:text-slate-100 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
       </div>
 
       <!-- Tenors -->
-      <div class="flex flex-col gap-1.5">
+      <div id="ctrl-tenors" class="flex flex-col gap-1.5">
         <label class="text-xs font-semibold text-gray-400 dark:text-slate-500 uppercase tracking-wider">Tenors</label>
         <div id="tenor-checkboxes" class="flex flex-wrap gap-1.5">
           <label class="pill-cb"><input type="checkbox" value="1M"><span>1M</span></label>
@@ -146,7 +147,7 @@
 <div class="flex items-center justify-between mb-2">
 
 <div class="text-sm text-gray-500 dark:text-slate-400">
-Yield Curve
+<span id="chart-card-label">Yield Curve</span>
 </div>
 
 <div class="flex items-center gap-2 text-xs">
@@ -165,12 +166,13 @@ Yield Curve
 </div>
 
 <div id="chart" style="height:460px;"></div>
+<div id="cod-container" class="hidden py-2 overflow-x-auto"></div>
 
 </div>
 
   <!-- Table -->
   <p id="table-note" class="hidden text-xs text-gray-400 dark:text-slate-500 mb-1 text-right"></p>
-  <div class="bg-white dark:bg-navy-800 rounded-2xl shadow-sm border border-gray-200 dark:border-navy-600 overflow-hidden">
+  <div id="yield-table-container" class="bg-white dark:bg-navy-800 rounded-2xl shadow-sm border border-gray-200 dark:border-navy-600 overflow-hidden">
     <table id="yield-table" class="w-full text-sm">
       <thead>
         <tr class="bg-gray-50 dark:bg-navy-900 border-b border-gray-200 dark:border-navy-600">
@@ -309,10 +311,17 @@ function setTenorDefaults() {
         );
     }
 
+    else if(modeSelect.value === 'cod'){
+        tenorCheckboxes.forEach(cb =>
+            cb.checked = (cb.value === '2Y' || cb.value === '5Y' || cb.value === '10Y' || cb.value === '30Y')
+        );
+    }
+
 }
 
 setTenorDefaults();
-modeSelect.addEventListener('change', () => { setTenorDefaults(); fetchData(); });
+updateControlsVisibility();
+modeSelect.addEventListener('change', () => { setTenorDefaults(); updateControlsVisibility(); fetchData(); });
 
 // ── Fetch ─────────────────────────────────────────────────────────
 async function fetchData() {
@@ -320,6 +329,8 @@ async function fetchData() {
     const start    = startDateInput.value;
     const end      = endDateInput.value;
     const selected = getSelectedCountries();
+
+    if(mode === 'cod') { await fetchCoDData(); return; }
 
     if(!selected.length) {
         clearError();
@@ -370,6 +381,113 @@ async function fetchData() {
     } catch(err) {
         showError(`Failed to fetch: ${err.message}. Is the server running? (uvicorn main:app)`);
     }
+}
+
+// ── Controls visibility ───────────────────────────────────────────
+function updateControlsVisibility() {
+    const isCod = modeSelect.value === 'cod';
+    document.getElementById('ctrl-from').classList.toggle('hidden', isCod);
+    document.getElementById('ctrl-to').classList.toggle('hidden', isCod);
+    document.getElementById('chart').style.display = isCod ? 'none' : '';
+    document.getElementById('cod-container').classList.toggle('hidden', !isCod);
+    document.getElementById('yield-table-container').classList.toggle('hidden', isCod);
+    document.getElementById('table-note').classList.toggle('hidden', true);
+    document.getElementById('chart-card-label').textContent = isCod ? 'Live Change on Day' : 'Yield Curve';
+}
+
+// ── Live CoD fetch & render ───────────────────────────────────────
+async function fetchCoDData() {
+    const selected = getSelectedCountries();
+    if(!selected.length) {
+        clearError();
+        document.getElementById('cod-container').innerHTML = '';
+        return;
+    }
+    try {
+        const sc = selected.join(',');
+        const url = `${API_BASE}/yield-curve-cod/all?selected_countries=${sc}&force_scrape=${forceBloomberg}`;
+        const cached = responseCache.get(url);
+        const cacheValid = cached !== undefined && (Date.now() - cached.ts) < CACHE_TTL_TODAY_MS;
+        const raw = cacheValid
+            ? cached.data
+            : await fetch(url).then(r => { if(!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); });
+        if(!cacheValid) responseCache.set(url, { data: raw, ts: Date.now() });
+        if(raw.error) { showError(raw.error); return; }
+        clearError();
+        const dataArray = Array.isArray(raw) ? raw : [raw];
+        updateCoDTable(dataArray[0]);
+    } catch(err) {
+        showError(`Failed to fetch CoD data: ${err.message}. Is the server running? (uvicorn main:app)`);
+    }
+}
+
+function updateCoDTable(codData) {
+    const ALL_TENORS = ["1M","3M","6M","1Y","2Y","5Y","10Y","30Y"];
+    const selected = getSelectedTenors();
+    const TENORS_LIST = selected.length ? ALL_TENORS.filter(t => selected.includes(t)) : ALL_TENORS;
+    const today     = codData.today_date;
+    const prevDate  = codData.prev_date || '—';
+    const tenorData = codData.tenors;
+
+    const thCls      = 'px-4 py-3 text-center text-xs font-semibold text-gray-500 dark:text-slate-400 uppercase tracking-wider';
+    const tdCls      = 'px-4 py-3 text-center font-mono text-sm text-gray-900 dark:text-slate-100';
+    const tdLabelCls = 'px-4 py-3 text-left text-sm font-semibold text-gray-700 dark:text-slate-300 whitespace-nowrap';
+    const na         = `<span class="text-gray-400 dark:text-slate-500">NA</span>`;
+
+    const tenorCells = TENORS_LIST.map(t =>
+        `<td class="${thCls}">${t}</td>`
+    ).join('');
+
+    const codCells = TENORS_LIST.map(t => {
+        const v = tenorData[t]?.cod_bps;
+        if(v === null || v === undefined) return `<td class="${tdCls}">${na}</td>`;
+        const colorCls = v > 0
+            ? 'text-red-500 dark:text-red-400'
+            : v < 0
+                ? 'text-green-500 dark:text-green-400'
+                : 'text-gray-500 dark:text-slate-400';
+        const sign = v > 0 ? '+' : '';
+        return `<td class="px-4 py-3 text-center font-mono text-sm font-bold ${colorCls}">${sign}${v.toFixed(2)}</td>`;
+    }).join('');
+
+    const todayCells = TENORS_LIST.map(t => {
+        const v = tenorData[t]?.today;
+        return `<td class="${tdCls}">${v !== null && v !== undefined ? v.toFixed(4) : na}</td>`;
+    }).join('');
+
+    const prevCells = TENORS_LIST.map(t => {
+        const v = tenorData[t]?.prev;
+        return `<td class="${tdCls}">${v !== null && v !== undefined ? v.toFixed(4) : na}</td>`;
+    }).join('');
+
+    document.getElementById('cod-container').innerHTML = `
+<div class="px-4 pt-3 pb-4">
+  <h2 class="text-base font-semibold text-gray-700 dark:text-slate-200 mb-3">
+    Live Change on Day &mdash; ${countryLabel(codData.country)}
+  </h2>
+  <div class="overflow-x-auto">
+    <table class="w-full text-sm border-collapse">
+      <tbody class="divide-y divide-gray-100 dark:divide-navy-700">
+        <tr class="bg-gray-50 dark:bg-navy-900">
+          <td class="${tdLabelCls} text-gray-500 dark:text-slate-400 text-xs uppercase tracking-wider">Tenor</td>
+          ${tenorCells}
+        </tr>
+        <tr>
+          <td class="${tdLabelCls}">CoD (bps)</td>
+          ${codCells}
+        </tr>
+        <tr class="bg-gray-50 dark:bg-navy-900/50">
+          <td class="${tdLabelCls}">${today}</td>
+          ${todayCells}
+        </tr>
+        <tr>
+          <td class="${tdLabelCls} text-gray-500 dark:text-slate-400">${prevDate}</td>
+          ${prevCells}
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>`;
 }
 
 // ── Error helpers ─────────────────────────────────────────────────

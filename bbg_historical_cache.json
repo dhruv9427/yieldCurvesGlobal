@@ -89,6 +89,36 @@
         "value": 4.87,
         "source": "BBG Cache"
       }
+    },
+    "2026-03-18": {
+      "3M": {
+        "value": 3.7,
+        "source": "BBG Cache"
+      },
+      "6M": {
+        "value": 3.7,
+        "source": "BBG Cache"
+      },
+      "1Y": {
+        "value": 3.68,
+        "source": "BBG Cache"
+      },
+      "2Y": {
+        "value": 3.77,
+        "source": "BBG Cache"
+      },
+      "5Y": {
+        "value": 3.88,
+        "source": "BBG Cache"
+      },
+      "10Y": {
+        "value": 4.26,
+        "source": "BBG Cache"
+      },
+      "30Y": {
+        "value": 4.88,
+        "source": "BBG Cache"
+      }
     }
   },
   "united_kingdom": {
@@ -145,6 +175,24 @@
         "value": 5.43,
         "source": "BBG Cache"
       }
+    },
+    "2026-03-18": {
+      "2Y": {
+        "value": 4.09,
+        "source": "BBG Cache"
+      },
+      "5Y": {
+        "value": 4.27,
+        "source": "BBG Cache"
+      },
+      "10Y": {
+        "value": 4.73,
+        "source": "BBG Cache"
+      },
+      "30Y": {
+        "value": 5.4,
+        "source": "BBG Cache"
+      }
     }
   },
   "germany": {
@@ -199,6 +247,24 @@
       },
       "30Y": {
         "value": 3.52,
+        "source": "BBG Cache"
+      }
+    },
+    "2026-03-18": {
+      "2Y": {
+        "value": 2.44,
+        "source": "BBG Cache"
+      },
+      "5Y": {
+        "value": 2.61,
+        "source": "BBG Cache"
+      },
+      "10Y": {
+        "value": 2.94,
+        "source": "BBG Cache"
+      },
+      "30Y": {
+        "value": 3.47,
         "source": "BBG Cache"
       }
     }

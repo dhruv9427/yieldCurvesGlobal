@@ -911,3 +911,99 @@ def get_yield_curve(
         return result if len(result) > 1 else result[0]["data"]
 
     return {"error": "Must provide either date or start/end"}
+
+
+# ---------------- Live CoD endpoint ----------------
+
+@app.get("/yield-curve-cod/{country}")
+def get_yield_curve_cod(
+        country: str,
+        selected_countries: str = Query(None),
+        force_scrape: bool = Query(False)
+):
+    """
+    Return Change-on-Day data for each tenor:
+      - today's yield
+      - the most recent prior day's yield (yesterday or last available)
+      - CoD in basis points = (today - prev) * 100
+    """
+    country = country.lower()
+    today_str = dt_date.today().isoformat()
+    today_date = dt_date.today()
+
+    target = resolve_countries(country, selected_countries)
+    if not target:
+        return {"error": "No valid countries specified"}
+
+    if force_scrape:
+        ensure_bloomberg_cached(target)
+
+    hist_cache = _get_historical_cache(force_scrape)
+
+    results = []
+    for c in target:
+        today_yields = get_today_yields(c, use_api=not force_scrape)
+
+        # Find the most recent prior date with data (up to 30 days back)
+        prev_date_str = None
+        prev_yields = {}
+
+        country_hist = hist_cache.get(c, {})
+        for i in range(1, 31):
+            check = (today_date - timedelta(days=i)).isoformat()
+            if country_hist.get(check):
+                prev_date_str = check
+                prev_yields = country_hist[check]
+                break
+
+        # For US, fall back to FRED if nothing found in historical cache
+        if prev_date_str is None and c == "united_states":
+            start_str = (today_date - timedelta(days=30)).isoformat()
+            end_str = (today_date - timedelta(days=1)).isoformat()
+            try:
+                combined = {}
+                with ThreadPoolExecutor(max_workers=len(tenors)) as pool:
+                    for tenor_data in pool.map(
+                        partial(fetch_fred_us_historical, start=start_str, end=end_str),
+                        tenors
+                    ):
+                        for d, vals in tenor_data.items():
+                            combined.setdefault(d, {}).update(vals)
+                if combined:
+                    prev_date_str = max(combined.keys())
+                    prev_yields = combined[prev_date_str]
+            except Exception:
+                pass
+
+        tenor_results = {}
+        for t in tenors:
+            today_val = today_yields.get(t)
+            today_value = today_val["value"] if isinstance(today_val, dict) and today_val else None
+
+            prev_val = prev_yields.get(t) if prev_yields else None
+            if isinstance(prev_val, dict):
+                prev_value = prev_val.get("value")
+            elif prev_val is not None:
+                prev_value = float(prev_val)
+            else:
+                prev_value = None
+
+            if today_value is not None and prev_value is not None:
+                cod_bps = round((today_value - prev_value) * 100, 2)
+            else:
+                cod_bps = None
+
+            tenor_results[t] = {
+                "today": round(today_value, 4) if today_value is not None else None,
+                "prev": round(float(prev_value), 4) if prev_value is not None else None,
+                "cod_bps": cod_bps,
+            }
+
+        results.append({
+            "country": c,
+            "today_date": today_str,
+            "prev_date": prev_date_str,
+            "tenors": tenor_results,
+        })
+
+    return results if len(results) > 1 else results[0]
