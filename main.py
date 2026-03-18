@@ -943,67 +943,79 @@ def get_yield_curve_cod(
     results = []
     for c in target:
         today_yields = get_today_yields(c, use_api=not force_scrape)
-
-        # Find the most recent prior date with data (up to 30 days back)
-        prev_date_str = None
-        prev_yields = {}
-
         country_hist = hist_cache.get(c, {})
-        for i in range(1, 31):
-            check = (today_date - timedelta(days=i)).isoformat()
-            if country_hist.get(check):
-                prev_date_str = check
-                prev_yields = country_hist[check]
-                break
 
-        # For US, fall back to FRED if nothing found in historical cache
-        if prev_date_str is None and c == "united_states":
-            start_str = (today_date - timedelta(days=30)).isoformat()
-            end_str = (today_date - timedelta(days=1)).isoformat()
+        # FRED: check yesterday specifically (US only)
+        yesterday = (today_date - timedelta(days=1)).isoformat()
+        fred_yesterday = {}  # {tenor: {value, source}}
+        if c == "united_states":
             try:
-                combined = {}
                 with ThreadPoolExecutor(max_workers=len(tenors)) as pool:
                     for tenor_data in pool.map(
-                        partial(fetch_fred_us_historical, start=start_str, end=end_str),
+                        partial(fetch_fred_us_historical, start=yesterday, end=yesterday),
                         tenors
                     ):
-                        for d, vals in tenor_data.items():
-                            combined.setdefault(d, {}).update(vals)
-                if combined:
-                    prev_date_str = max(combined.keys())
-                    prev_yields = combined[prev_date_str]
+                        fred_yesterday.update(tenor_data.get(yesterday, {}))
             except Exception:
                 pass
 
         tenor_results = {}
+        prev_dates_used = []
+
         for t in tenors:
             today_val = today_yields.get(t)
-            today_value = today_val["value"] if isinstance(today_val, dict) and today_val else None
+            today_value  = today_val["value"]  if isinstance(today_val, dict) and today_val else None
+            today_source = today_val["source"] if isinstance(today_val, dict) and today_val else None
 
-            prev_val = prev_yields.get(t) if prev_yields else None
-            if isinstance(prev_val, dict):
-                prev_value = prev_val.get("value")
-            elif prev_val is not None:
-                prev_value = float(prev_val)
-            else:
-                prev_value = None
+            prev_value    = None
+            prev_source   = None
+            prev_date_used = None
 
-            if today_value is not None and prev_value is not None:
-                cod_bps = round((today_value - prev_value) * 100, 2)
-            else:
-                cod_bps = None
+            # 1. FRED yesterday (US only)
+            fv = fred_yesterday.get(t)
+            if fv is not None:
+                prev_value     = fv["value"]  if isinstance(fv, dict) else float(fv)
+                prev_source    = fv["source"] if isinstance(fv, dict) else "FRED API"
+                prev_date_used = yesterday
+
+            # 2. Toggle cache — try yesterday first, then walk back for last available
+            if prev_value is None:
+                for i in range(1, 31):
+                    check = (today_date - timedelta(days=i)).isoformat()
+                    cv = country_hist.get(check, {}).get(t)
+                    if cv is not None:
+                        prev_value    = cv["value"]  if isinstance(cv, dict) else float(cv)
+                        prev_source   = cv["source"] if isinstance(cv, dict) else (
+                            "BBG Cache" if force_scrape else "FinanceFlow Cache"
+                        )
+                        prev_date_used = check
+                        break
+
+            if prev_date_used:
+                prev_dates_used.append(prev_date_used)
+
+            cod_bps = (
+                round((today_value - prev_value) * 100, 2)
+                if today_value is not None and prev_value is not None
+                else None
+            )
 
             tenor_results[t] = {
-                "today": round(today_value, 4) if today_value is not None else None,
-                "prev": round(float(prev_value), 4) if prev_value is not None else None,
-                "cod_bps": cod_bps,
+                "today":        round(today_value, 4)       if today_value  is not None else None,
+                "today_source": today_source,
+                "prev":         round(float(prev_value), 4) if prev_value   is not None else None,
+                "prev_source":  prev_source,
+                "prev_date_used": prev_date_used,
+                "cod_bps":      cod_bps,
             }
 
+        overall_prev_date = max(prev_dates_used) if prev_dates_used else None
+
         results.append({
-            "country": c,
+            "country":    c,
             "today_date": today_str,
-            "prev_date": prev_date_str,
-            "tenors": tenor_results,
+            "prev_date":  overall_prev_date,
+            "tenors":     tenor_results,
         })
 
     return results if len(results) > 1 else results[0]
