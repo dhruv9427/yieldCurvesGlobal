@@ -824,8 +824,7 @@ def get_yield_curve(
 
         us_cache = {}
 
-        # FRED is only used in Bloomberg mode; FF toggle uses FF historical cache directly for all countries
-        if force_scrape and non_today and "united_states" in target:
+        if non_today and "united_states" in target:
 
             rs, re = min(non_today), max(non_today)
 
@@ -851,9 +850,9 @@ def get_yield_curve(
                         val = today_yields.get(t)
                         row[t] = val["value"] if val else None
                         row[f"{t}_source"] = val["source"] if val else None
-                    elif c == "united_states" and force_scrape:
+                    elif c == "united_states":
                         val = us_cache.get(d, {}).get(t)
-                        # FRED had no data for this date — fall back to BBG historical cache
+                        # FRED had no data for this date — fall back to source-specific historical cache
                         if val is None:
                             val = _get_historical_cache(force_scrape).get(c, {}).get(d, {}).get(t)
                         row[t] = val["value"] if val else None
@@ -881,13 +880,13 @@ def get_yield_curve(
 
             if date == today_str:
                 yields = {t: today_yields.get(t) for t in tenors}
-            elif c == "united_states" and force_scrape:
+            elif c == "united_states":
                 with ThreadPoolExecutor(max_workers=len(tenors)) as pool:
                     fred_results = pool.map(partial(fetch_fred_us_historical, start=date, end=date), tenors)
                 yields = {}
                 for t, data in zip(tenors, fred_results):
                     val = list(data.values())[0][t] if data else None
-                    # FRED had no data for this date — fall back to BBG historical cache
+                    # FRED had no data for this date — fall back to source-specific historical cache
                     if val is None:
                         val = _get_historical_cache(force_scrape).get(c, {}).get(date, {}).get(t)
                     yields[t] = val
@@ -909,8 +908,7 @@ def get_yield_curve(
 
         us_cache = {}
 
-        # FRED is only used in Bloomberg mode; FF toggle uses FF historical cache directly for all countries
-        if force_scrape and non_today and "united_states" in target:
+        if non_today and "united_states" in target:
 
             rs, re = min(non_today), max(non_today)
 
@@ -938,9 +936,9 @@ def get_yield_curve(
                     if d == today_str:
                         country_data[d][t] = today_yields.get(t)
 
-                    elif c == "united_states" and force_scrape:
+                    elif c == "united_states":
                         val = us_cache.get(d, {}).get(t)
-                        # FRED had no data for this date — fall back to BBG historical cache
+                        # FRED had no data for this date — fall back to source-specific historical cache
                         if val is None:
                             val = _get_historical_cache(force_scrape).get(c, {}).get(d, {}).get(t)
                         country_data[d][t] = val
