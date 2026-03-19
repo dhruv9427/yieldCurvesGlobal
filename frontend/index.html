@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="dark">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -448,7 +448,7 @@ function updateControlsVisibility() {
             if (mode === 'country-overlay-hist') {
                 startDateInput.value = yest;
             } else {
-                const d = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+                const d = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000);
                 startDateInput.value = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
             }
         }
