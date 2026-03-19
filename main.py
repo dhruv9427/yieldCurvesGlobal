@@ -183,7 +183,7 @@ _seed_bbg_historical_from_last_good()
 
 @app.get("/")
 def root():
-    return FileResponse("frontend/index.html")
+    return FileResponse("frontend/index.html", headers={"Cache-Control": "no-cache, no-store, must-revalidate"})
 
 
 @app.get("/debug/bbg-scrape")
