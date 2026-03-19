@@ -430,6 +430,10 @@ function updateControlsVisibility() {
     // Toggle between single-select (radio) and multi-select (checkbox) country picker
     document.getElementById('country-single').classList.toggle('hidden', overlay);
     document.getElementById('country-multi').classList.toggle('hidden', !overlay);
+    // Default: select all countries when entering an overlay mode
+    if (overlay) {
+        countryMultiCheckboxes.forEach(cb => cb.checked = true);
+    }
     updateCountryBtnLabel();
 
     // Date constraints for historical overlay modes — today is not allowed
