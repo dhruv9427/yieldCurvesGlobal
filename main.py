@@ -9,6 +9,9 @@ import requests
 import json
 import os
 import threading
+import re
+import time
+from xml.etree import ElementTree as ET
 from datetime import date as dt_date, timedelta, datetime
 from playwright.sync_api import sync_playwright
 from playwright_stealth import Stealth
@@ -35,6 +38,7 @@ async def lifespan(app: FastAPI):
     threading.Thread(target=_prewarm, daemon=True).start()
     threading.Thread(target=_financeflow_eod_scheduler, daemon=True).start()
     threading.Thread(target=_bloomberg_background_scheduler, daemon=True).start()
+    threading.Thread(target=_new_issues_corps_scheduler, daemon=True).start()
     yield
 
 
@@ -1114,3 +1118,199 @@ def get_ust_auctions(
         return resp.json()
     except Exception as e:
         return {"error": str(e)}
+
+
+# ---------------- New Issues (Corps) via SEC EDGAR 424B2 ----------------
+
+_SEC_HEADERS = {
+    "User-Agent": "YieldCurveDashboard dhruv_9427@hotmail.com",
+    "Accept-Encoding": "gzip, deflate",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+}
+
+NEW_ISSUES_CORPS_CACHE = []
+NEW_ISSUES_CORPS_CACHE_DATE = None
+_new_issues_lock = threading.Lock()
+
+
+def _strip_html_tags(html: str) -> str:
+    text = re.sub(r'<style[^>]*>.*?</style>', ' ', html, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r'<script[^>]*>.*?</script>', ' ', text, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r'<[^>]+>', ' ', text)
+    text = text.replace('&nbsp;', ' ').replace('&amp;', '&').replace('&lt;', '<').replace('&gt;', '>')
+    text = re.sub(r'&#\d+;', ' ', text)
+    return re.sub(r'\s+', ' ', text).strip()
+
+
+def _parse_bond_terms(text: str) -> dict:
+    r = {'ticker': None, 'coupon': None, 'maturity': None,
+         'call_date': None, 'cusip': None, 'offering_size': None}
+
+    # CUSIP: exactly 9 alphanumeric chars after the label
+    m = re.search(r'CUSIP(?:\s+No\.?|:|\s+Number:?)?\s*([0-9A-Z]{9})\b', text, re.IGNORECASE)
+    if m:
+        r['cusip'] = m.group(1)
+
+    # Coupon: "X.XXX% ... Notes/Bonds/Debentures"
+    m = re.search(
+        r'(\d{1,2}\.\d+)\s*%\s*(?:Per Annum\s+)?(?:Fixed[\s-]?Rate\s+)?'
+        r'(?:Senior\s+(?:Secured\s+)?|Subordinated\s+|Junior\s+)?'
+        r'(?:Notes?|Bonds?|Debentures?)',
+        text, re.IGNORECASE)
+    if m:
+        r['coupon'] = m.group(1) + '%'
+
+    # Maturity year from "due YYYY" or "due Month DD, YYYY"
+    m = re.search(
+        r'(?:due|matur(?:ing|ity|e)(?:\s+on)?)\s+'
+        r'(?:(?:January|February|March|April|May|June|July|August|September|October|November|December'
+        r'|Jan\.?|Feb\.?|Mar\.?|Apr\.?|Jun\.?|Jul\.?|Aug\.?|Sep\.?|Oct\.?|Nov\.?|Dec\.?)'
+        r'\s+\d{1,2},?\s+)?(\d{4})',
+        text, re.IGNORECASE)
+    if m:
+        r['maturity'] = m.group(1)
+
+    # Offering size — "$X billion / million" then fallback to raw dollar amount
+    m = re.search(r'\$\s*([\d,.]+)\s*(billion|million)\b', text, re.IGNORECASE)
+    if m:
+        amt = float(m.group(1).replace(',', ''))
+        r['offering_size'] = f"${amt:.1f}B" if 'billion' in m.group(2).lower() else f"${amt:.0f}M"
+    else:
+        m = re.search(r'\$([\d,]{10,})\b', text)
+        if m:
+            val = int(m.group(1).replace(',', ''))
+            if val >= 1_000_000_000:
+                r['offering_size'] = f"${val / 1e9:.1f}B"
+            elif val >= 1_000_000:
+                r['offering_size'] = f"${val / 1e6:.0f}M"
+
+    # First call date
+    m = re.search(
+        r'(?:first\s+)?(?:optional\s+)?(?:call|redeem(?:able)?|redemption)\s+(?:date\s+)?'
+        r'(?:on\s+or\s+after\s+)?'
+        r'((?:January|February|March|April|May|June|July|August|September|October|November|December'
+        r'|Jan\.?|Feb\.?|Mar\.?|Apr\.?|Jun\.?|Jul\.?|Aug\.?|Sep\.?|Oct\.?|Nov\.?|Dec\.?)'
+        r'\s+\d{1,2},?\s+\d{4})',
+        text, re.IGNORECASE)
+    if m:
+        r['call_date'] = m.group(1).strip()
+
+    # Ticker from "(NYSE: XXX)" or "(NASDAQ: XXX)"
+    m = re.search(r'\((?:NYSE|NASDAQ|Nasdaq|NYSE\s+Arca|NYSEARCA)\s*:\s*([A-Z]{1,5})\)', text)
+    if m:
+        r['ticker'] = m.group(1)
+
+    return r
+
+
+def _get_primary_doc_url(index_url: str):
+    """Fetch filing index page and return URL of the primary 424B2 HTML document."""
+    try:
+        resp = requests.get(index_url, headers=_SEC_HEADERS, timeout=15)
+        resp.raise_for_status()
+        for m in re.finditer(r'href="(/Archives/edgar/data/[^"]+\.htm)"', resp.text, re.IGNORECASE):
+            path = m.group(1)
+            if '-index' not in path.lower():
+                return 'https://www.sec.gov' + path
+    except Exception as e:
+        print(f"[new-issues] index fetch failed {index_url}: {e}")
+    return None
+
+
+def _fetch_new_issues_corps():
+    global NEW_ISSUES_CORPS_CACHE, NEW_ISSUES_CORPS_CACHE_DATE
+    with _new_issues_lock:
+        today = dt_date.today().isoformat()
+        print("[new-issues] Fetching 424B2 Atom feed from SEC EDGAR…")
+        try:
+            resp = requests.get(
+                "https://www.sec.gov/cgi-bin/browse-edgar"
+                "?action=getcurrent&type=424B2&count=40&output=atom",
+                headers=_SEC_HEADERS, timeout=30
+            )
+            resp.raise_for_status()
+        except Exception as e:
+            print(f"[new-issues] Atom feed error: {e}")
+            return
+
+        try:
+            root = ET.fromstring(resp.content)
+        except Exception as e:
+            print(f"[new-issues] XML parse error: {e}")
+            return
+
+        ns = {'a': 'http://www.w3.org/2005/Atom'}
+        entries = root.findall('a:entry', ns)
+        print(f"[new-issues] Parsing {len(entries)} filings…")
+
+        results = []
+        for entry in entries:
+            title_el   = entry.find('a:title', ns)
+            link_el    = entry.find('a:link', ns)
+            updated_el = entry.find('a:updated', ns)
+            if link_el is None:
+                continue
+
+            raw_title = (title_el.text or '') if title_el is not None else ''
+            m = re.match(r'^424B2\s+-\s+(.+?)\s+\(\d+\)', raw_title, re.IGNORECASE)
+            company = m.group(1).strip() if m else raw_title
+
+            index_url  = link_el.get('href', '')
+            filed_date = (updated_el.text or '')[:10] if updated_el is not None else ''
+
+            time.sleep(0.12)  # ~8 req/s — within SEC rate limit
+            doc_url = _get_primary_doc_url(index_url)
+            bond = {'ticker': None, 'coupon': None, 'maturity': None,
+                    'call_date': None, 'cusip': None, 'offering_size': None}
+            if doc_url:
+                try:
+                    time.sleep(0.12)
+                    dr = requests.get(doc_url, headers=_SEC_HEADERS, timeout=20)
+                    dr.raise_for_status()
+                    bond = _parse_bond_terms(_strip_html_tags(dr.text))
+                except Exception as e:
+                    print(f"[new-issues] doc fetch failed {doc_url}: {e}")
+
+            results.append({
+                'company':       company,
+                'ticker':        bond['ticker'],
+                'coupon':        bond['coupon'],
+                'maturity':      bond['maturity'],
+                'call_date':     bond['call_date'],
+                'cusip':         bond['cusip'],
+                'offering_size': bond['offering_size'],
+                'filed':         filed_date,
+                'filing_url':    index_url,
+            })
+
+        NEW_ISSUES_CORPS_CACHE = results
+        NEW_ISSUES_CORPS_CACHE_DATE = today
+        print(f"[new-issues] Done — {len(results)} entries cached for {today}")
+
+
+def _new_issues_corps_scheduler():
+    """Fire once daily at 06:00 UTC (≈ 6 AM UK time in winter, 7 AM in summer)."""
+    last_run_date = None
+    while True:
+        now = datetime.utcnow()
+        today = now.date().isoformat()
+        if now.hour == 6 and last_run_date != today:
+            last_run_date = today
+            _fetch_new_issues_corps()
+        time.sleep(30)
+
+
+@app.get("/new-issues-corps")
+def get_new_issues_corps():
+    if _new_issues_lock.locked():
+        return {"status": "loading", "data": [], "date": None}
+    if not NEW_ISSUES_CORPS_CACHE:
+        return {"status": "empty", "data": [], "date": None}
+    return {"status": "ok", "data": NEW_ISSUES_CORPS_CACHE, "date": NEW_ISSUES_CORPS_CACHE_DATE}
+
+
+@app.post("/new-issues-corps/refresh")
+def refresh_new_issues_corps():
+    if not _new_issues_lock.locked():
+        threading.Thread(target=_fetch_new_issues_corps, daemon=True).start()
+    return {"status": "loading"}

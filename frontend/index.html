@@ -53,6 +53,10 @@
   html.dark #ust-auctions-table tbody tr:nth-child(even) { background-color: #0a1628; }
   #ust-auctions-table tbody tr:hover { background-color: #eff6ff; }
   html.dark #ust-auctions-table tbody tr:hover { background-color: #1a3358; }
+  #new-issues-table tbody tr:nth-child(even) { background-color: #f9fafb; }
+  html.dark #new-issues-table tbody tr:nth-child(even) { background-color: #0a1628; }
+  #new-issues-table tbody tr:hover { background-color: #eff6ff; }
+  html.dark #new-issues-table tbody tr:hover { background-color: #1a3358; }
 </style>
 </head>
 <body class="bg-gray-100 dark:bg-navy-900 text-gray-900 dark:text-slate-100 min-h-screen transition-colors duration-300">
@@ -90,7 +94,15 @@
           <option value="country-overlay-hist">Country Overlay (Hist)</option>
           <option value="tenor-overlay-hist">Tenor Overlay (Hist)</option>
           <option value="ust-auctions">UST Auctions</option>
+          <option value="new-issues-corps">New Issues (Corps)</option>
         </select>
+      </div>
+
+      <!-- Search -->
+      <div class="flex flex-col gap-1.5">
+        <label class="text-xs font-semibold text-gray-400 dark:text-slate-500 uppercase tracking-wider">Search</label>
+        <input type="text" id="table-search" placeholder="Filter rows…"
+          class="px-3 py-2 rounded-lg border border-gray-200 dark:border-navy-600 bg-gray-50 dark:bg-navy-900 text-gray-900 dark:text-slate-100 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 min-w-[180px]">
       </div>
 
       <!-- Country multi-select overlay -->
@@ -241,6 +253,41 @@
     </div>
   </div>
 
+  <!-- New Issues (Corps) Table -->
+  <div id="new-issues-corps-container" class="hidden">
+    <div class="flex items-center justify-between mb-3">
+      <div id="new-issues-status" class="text-sm text-gray-500 dark:text-slate-400"></div>
+      <button id="new-issues-fetch-btn"
+        class="px-3 py-1.5 rounded-lg border border-gray-200 dark:border-navy-600 bg-gray-50 dark:bg-navy-900 text-gray-700 dark:text-slate-300 text-xs font-semibold hover:bg-blue-50 dark:hover:bg-navy-700 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors">
+        Fetch
+      </button>
+    </div>
+    <div class="bg-white dark:bg-navy-800 rounded-2xl shadow-sm border border-gray-200 dark:border-navy-600 overflow-hidden">
+      <table id="new-issues-table" class="w-full text-sm">
+        <thead>
+          <tr class="bg-gray-50 dark:bg-navy-900 border-b border-gray-200 dark:border-navy-600">
+            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-slate-400 uppercase tracking-wider">Company</th>
+            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-slate-400 uppercase tracking-wider">Ticker</th>
+            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-slate-400 uppercase tracking-wider">Coupon</th>
+            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-slate-400 uppercase tracking-wider">Maturity</th>
+            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-slate-400 uppercase tracking-wider">Call Date</th>
+            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-slate-400 uppercase tracking-wider">CUSIP</th>
+            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-slate-400 uppercase tracking-wider">Size</th>
+            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-slate-400 uppercase tracking-wider">Filed</th>
+            <th class="px-4 py-3 text-center text-xs font-semibold text-gray-500 dark:text-slate-400 uppercase tracking-wider">Filing</th>
+          </tr>
+        </thead>
+        <tbody id="new-issues-body" class="divide-y divide-gray-100 dark:divide-navy-700"></tbody>
+      </table>
+    </div>
+    <div class="mt-3 text-center">
+      <a href="https://www.sec.gov/cgi-bin/browse-edgar?action=getcurrent&type=424B2&count=100" target="_blank" rel="noopener noreferrer"
+         class="text-xs text-blue-500 hover:text-blue-600 dark:text-blue-400 dark:hover:text-blue-300 underline">
+        SEC EDGAR - 424B2 Filings
+      </a>
+    </div>
+  </div>
+
 </div>
 
 <script>
@@ -288,6 +335,7 @@ const tableBody        = document.querySelector('#yield-table tbody');
 
 let forceBloomberg = true;
 let autoRefreshInterval = null;
+let _newIssuesPollInterval = null;
 
 let lastChart = null; // { data, mode, selectedCountries }
 const responseCache = new Map(); // url → { data, ts }
@@ -398,6 +446,7 @@ modeSelect.addEventListener('change', () => { setTenorDefaults(); updateControls
 async function fetchData() {
     const mode     = modeSelect.value;
     if(mode === 'ust-auctions') { await fetchUSTAuctionsData(); return; }
+    if(mode === 'new-issues-corps') { await fetchNewIssuesCorps(); return; }
     const bMode    = baseMode(mode);
     const overlay  = isOverlayMode();
     const yest     = yesterdayStr();
@@ -466,24 +515,31 @@ function updateControlsVisibility() {
     const mode = modeSelect.value;
     const isCod = mode === 'cod';
     const isUSTAuctions = mode === 'ust-auctions';
+    const isNewIssuesCorps = mode === 'new-issues-corps';
+    const hideChartCard = isUSTAuctions || isNewIssuesCorps;
+    const hideCountryTenor = isUSTAuctions || isNewIssuesCorps;
     const overlay = mode === 'country-overlay-hist' || mode === 'tenor-overlay-hist';
-    document.getElementById('ctrl-from').classList.toggle('hidden', isCod);
-    document.getElementById('ctrl-to').classList.toggle('hidden', isCod);
+    document.getElementById('ctrl-from').classList.toggle('hidden', isCod || isNewIssuesCorps);
+    document.getElementById('ctrl-to').classList.toggle('hidden', isCod || isNewIssuesCorps);
     document.getElementById('chart').style.display = isCod ? 'none' : '';
-    document.getElementById('chart-card').classList.toggle('hidden', isUSTAuctions);
+    document.getElementById('chart-card').classList.toggle('hidden', hideChartCard);
     document.getElementById('cod-container').classList.toggle('hidden', !isCod);
-    document.getElementById('yield-table-container').classList.toggle('hidden', isCod || isUSTAuctions);
+    document.getElementById('yield-table-container').classList.toggle('hidden', isCod || isUSTAuctions || isNewIssuesCorps);
     document.getElementById('ust-auctions-container').classList.toggle('hidden', !isUSTAuctions);
+    document.getElementById('new-issues-corps-container').classList.toggle('hidden', !isNewIssuesCorps);
     document.getElementById('ctrl-ust-date-fields').classList.toggle('hidden', !isUSTAuctions);
-    document.getElementById('ctrl-tenors').classList.toggle('hidden', isUSTAuctions);
-    document.getElementById('country-wrapper').classList.toggle('hidden', isUSTAuctions);
+    document.getElementById('ctrl-tenors').classList.toggle('hidden', hideCountryTenor);
+    document.getElementById('country-wrapper').classList.toggle('hidden', hideCountryTenor);
     document.getElementById('table-note').classList.toggle('hidden', true);
     document.getElementById('chart-card-label').textContent = isCod ? 'Live Change on Day' : 'Yield Curve';
 
-    // Reset dates to today when entering UST Auctions mode
-    if (isUSTAuctions) {
-        startDateInput.value = todayStr();
-        endDateInput.value = todayStr();
+    // Clear search on mode switch
+    document.getElementById('table-search').value = '';
+
+    // Clear new-issues poll if switching away
+    if (!isNewIssuesCorps && _newIssuesPollInterval) {
+        clearInterval(_newIssuesPollInterval);
+        _newIssuesPollInterval = null;
     }
 
     // Toggle between single-select (radio) and multi-select (checkbox) country picker
@@ -514,6 +570,15 @@ function updateControlsVisibility() {
     } else {
         startDateInput.removeAttribute('max');
         endDateInput.removeAttribute('max');
+        if (mode === 'tenor' || mode === 'spread') {
+            endDateInput.value = todayStr();
+            const d = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+            startDateInput.value = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+        } else {
+            // country, cod, ust-auctions, new-issues-corps
+            startDateInput.value = todayStr();
+            endDateInput.value = todayStr();
+        }
     }
 }
 
@@ -718,7 +783,103 @@ function updateUSTAuctionsTable(securities) {
         <td class="${td}">${formatTreasuryDate(s.maturityDate)}</td>
     </tr>`);
     document.getElementById('ust-auctions-body').innerHTML = rows.join('');
+    filterTable();
 }
+
+// ── New Issues (Corps) ────────────────────────────────────────────
+async function fetchNewIssuesCorps() {
+    try {
+        const resp = await fetch(`${API_BASE}/new-issues-corps`);
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const json = await resp.json();
+        const statusEl = document.getElementById('new-issues-status');
+        const fetchBtn = document.getElementById('new-issues-fetch-btn');
+
+        if (json.status === 'loading') {
+            statusEl.textContent = 'Fetching 424B2 filings from SEC EDGAR… (~30–60 s)';
+            fetchBtn.disabled = true;
+            fetchBtn.textContent = 'Fetching…';
+            document.getElementById('new-issues-body').innerHTML =
+                `<tr><td colspan="9" class="px-4 py-6 text-center text-sm text-gray-400 dark:text-slate-500">Loading…</td></tr>`;
+            if (!_newIssuesPollInterval) {
+                _newIssuesPollInterval = setInterval(() => {
+                    if (modeSelect.value === 'new-issues-corps') fetchNewIssuesCorps();
+                    else { clearInterval(_newIssuesPollInterval); _newIssuesPollInterval = null; }
+                }, 5000);
+            }
+        } else {
+            clearInterval(_newIssuesPollInterval);
+            _newIssuesPollInterval = null;
+            fetchBtn.disabled = false;
+            fetchBtn.textContent = 'Fetch';
+            if (json.status === 'empty') {
+                statusEl.textContent = 'No data — click Fetch or wait for the 6 AM scheduled run.';
+                document.getElementById('new-issues-body').innerHTML =
+                    `<tr><td colspan="9" class="px-4 py-6 text-center text-sm text-gray-400 dark:text-slate-500">No data</td></tr>`;
+            } else {
+                statusEl.textContent = `424B2 filings — ${json.date || ''}  ·  ${json.data.length} entries`;
+                clearError();
+                updateNewIssuesCorpsTable(json.data);
+            }
+        }
+    } catch(err) {
+        showError(`Failed to fetch new issues: ${err.message}`);
+    }
+}
+
+document.getElementById('new-issues-fetch-btn').addEventListener('click', async () => {
+    const btn = document.getElementById('new-issues-fetch-btn');
+    btn.disabled = true;
+    btn.textContent = 'Fetching…';
+    try {
+        await fetch(`${API_BASE}/new-issues-corps/refresh`, { method: 'POST' });
+        fetchNewIssuesCorps();
+    } catch(err) {
+        showError(`Failed to trigger fetch: ${err.message}`);
+        btn.disabled = false;
+        btn.textContent = 'Fetch';
+    }
+});
+
+function updateNewIssuesCorpsTable(data) {
+    const td  = 'px-4 py-2.5 text-sm text-gray-700 dark:text-slate-300';
+    const tdc = 'px-4 py-2.5 text-sm font-mono text-xs text-gray-700 dark:text-slate-300';
+    data = [...data].sort((a, b) => (a.company || '').localeCompare(b.company || ''));
+    if (!data.length) {
+        document.getElementById('new-issues-body').innerHTML =
+            `<tr><td colspan="9" class="px-4 py-6 text-center text-sm text-gray-400 dark:text-slate-500">No results</td></tr>`;
+        return;
+    }
+    const rows = data.map(s => `<tr>
+        <td class="${td}">${s.company || '-'}</td>
+        <td class="${td} font-semibold">${s.ticker || '-'}</td>
+        <td class="${td} font-mono">${s.coupon || '-'}</td>
+        <td class="${td}">${s.maturity || '-'}</td>
+        <td class="${td}">${s.call_date || '-'}</td>
+        <td class="${tdc}">${s.cusip || '-'}</td>
+        <td class="${td}">${s.offering_size || '-'}</td>
+        <td class="${td}">${s.filed || '-'}</td>
+        <td class="px-4 py-2.5 text-center">${s.filing_url
+            ? `<a href="${s.filing_url}" target="_blank" rel="noopener" class="text-xs text-blue-500 hover:text-blue-600 dark:text-blue-400 underline">View</a>`
+            : '-'}</td>
+    </tr>`);
+    document.getElementById('new-issues-body').innerHTML = rows.join('');
+    filterTable();
+}
+
+// ── Table search filter ───────────────────────────────────────────
+function filterTable() {
+    const q = document.getElementById('table-search').value.toLowerCase();
+    ['yield-table', 'ust-auctions-table', 'new-issues-table'].forEach(id => {
+        const tbody = document.querySelector(`#${id} tbody`);
+        if (!tbody) return;
+        tbody.querySelectorAll('tr').forEach(row => {
+            row.style.display = (!q || row.textContent.toLowerCase().includes(q)) ? '' : 'none';
+        });
+    });
+}
+
+document.getElementById('table-search').addEventListener('input', filterTable);
 
 // ── Error helpers ─────────────────────────────────────────────────
 function showError(msg) {
@@ -969,10 +1130,10 @@ function updateTable(data, mode) {
     } else {
         note.classList.add('hidden');
     }
+    filterTable();
 }
 
 // ── Event listeners ───────────────────────────────────────────────
-modeSelect.addEventListener('change', fetchData);
 startDateInput.addEventListener('change', fetchData);
 endDateInput.addEventListener('change', fetchData);
 tenorCheckboxes.forEach(cb => {
