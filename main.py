@@ -1094,3 +1094,23 @@ def get_yield_curve_cod(
         })
 
     return results if len(results) > 1 else results[0]
+
+
+# ---------------- TreasuryDirect proxy ----------------
+
+@app.get("/ust-auctions")
+def get_ust_auctions(
+        startDate: str = Query(...),
+        endDate: str = Query(...),
+        dateFieldName: str = Query(...)
+):
+    url = (
+        f"https://www.treasurydirect.gov/TA_WS/securities/search"
+        f"?startDate={startDate}&endDate={endDate}&dateFieldName={dateFieldName}&format=json"
+    )
+    try:
+        resp = requests.get(url, timeout=15)
+        resp.raise_for_status()
+        return resp.json()
+    except Exception as e:
+        return {"error": str(e)}

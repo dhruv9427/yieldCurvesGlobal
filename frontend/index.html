@@ -49,6 +49,10 @@
   html.dark #yield-table tbody tr:nth-child(even) { background-color: #0a1628; }
   #yield-table tbody tr:hover { background-color: #eff6ff; }
   html.dark #yield-table tbody tr:hover { background-color: #1a3358; }
+  #ust-auctions-table tbody tr:nth-child(even) { background-color: #f9fafb; }
+  html.dark #ust-auctions-table tbody tr:nth-child(even) { background-color: #0a1628; }
+  #ust-auctions-table tbody tr:hover { background-color: #eff6ff; }
+  html.dark #ust-auctions-table tbody tr:hover { background-color: #1a3358; }
 </style>
 </head>
 <body class="bg-gray-100 dark:bg-navy-900 text-gray-900 dark:text-slate-100 min-h-screen transition-colors duration-300">
@@ -85,6 +89,7 @@
           <option value="cod">Live CoD</option>
           <option value="country-overlay-hist">Country Overlay (Hist)</option>
           <option value="tenor-overlay-hist">Tenor Overlay (Hist)</option>
+          <option value="ust-auctions">UST Auctions</option>
         </select>
       </div>
 
@@ -143,6 +148,17 @@
         </div>
       </div>
 
+      <!-- UST Auctions - Date Field -->
+      <div id="ctrl-ust-date-fields" class="flex flex-col gap-1.5 hidden">
+        <label class="text-xs font-semibold text-gray-400 dark:text-slate-500 uppercase tracking-wider">Date Field</label>
+        <div id="ust-date-field-checkboxes" class="flex flex-wrap gap-1.5">
+          <label class="pill-cb"><input type="checkbox" value="announcementDate" checked><span>Announcement Date</span></label>
+          <label class="pill-cb"><input type="checkbox" value="auctionDate"><span>Auction Date</span></label>
+          <label class="pill-cb"><input type="checkbox" value="issueDate"><span>Issue Date</span></label>
+          <label class="pill-cb"><input type="checkbox" value="maturityDate"><span>Maturity Date</span></label>
+        </div>
+      </div>
+
     </div>
   </div>
 
@@ -150,7 +166,7 @@
   <div id="error-msg" class="hidden mb-4 px-4 py-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 text-sm"></div>
 
   <!-- Chart -->
-<div class="bg-white dark:bg-navy-800 rounded-2xl shadow-sm border border-gray-200 dark:border-navy-600 p-4 mb-5">
+<div id="chart-card" class="bg-white dark:bg-navy-800 rounded-2xl shadow-sm border border-gray-200 dark:border-navy-600 p-4 mb-5">
 
 <div class="flex items-center justify-between mb-2">
 
@@ -193,6 +209,36 @@
       </thead>
       <tbody class="divide-y divide-gray-100 dark:divide-navy-700"></tbody>
     </table>
+  </div>
+
+  <!-- UST Auctions Table -->
+  <div id="ust-auctions-container" class="hidden">
+    <div class="bg-white dark:bg-navy-800 rounded-2xl shadow-sm border border-gray-200 dark:border-navy-600 overflow-hidden">
+      <table id="ust-auctions-table" class="w-full text-sm">
+        <thead>
+          <tr class="bg-gray-50 dark:bg-navy-900 border-b border-gray-200 dark:border-navy-600">
+            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-slate-400 uppercase tracking-wider">Security Type</th>
+            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-slate-400 uppercase tracking-wider">Tenor</th>
+            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-slate-400 uppercase tracking-wider">Coupon Frequency</th>
+            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-slate-400 uppercase tracking-wider">CUSIP</th>
+            <th class="px-4 py-3 text-right text-xs font-semibold text-gray-500 dark:text-slate-400 uppercase tracking-wider">Bid To Cover</th>
+            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-slate-400 uppercase tracking-wider">Reopening</th>
+            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-slate-400 uppercase tracking-wider">Original Security Term</th>
+            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-slate-400 uppercase tracking-wider">Announcement Date</th>
+            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-slate-400 uppercase tracking-wider">Auction Date</th>
+            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-slate-400 uppercase tracking-wider">Issue Date</th>
+            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-slate-400 uppercase tracking-wider">Maturity Date</th>
+          </tr>
+        </thead>
+        <tbody id="ust-auctions-body" class="divide-y divide-gray-100 dark:divide-navy-700"></tbody>
+      </table>
+    </div>
+    <div class="mt-3 text-center">
+      <a href="https://treasurydirect.gov/auctions/announcements-data-results/" target="_blank" rel="noopener noreferrer"
+         class="text-xs text-blue-500 hover:text-blue-600 dark:text-blue-400 dark:hover:text-blue-300 underline">
+        TreasuryDirect - Announcements, Data and Results
+      </a>
+    </div>
   </div>
 
 </div>
@@ -351,6 +397,7 @@ modeSelect.addEventListener('change', () => { setTenorDefaults(); updateControls
 // ── Fetch ─────────────────────────────────────────────────────────
 async function fetchData() {
     const mode     = modeSelect.value;
+    if(mode === 'ust-auctions') { await fetchUSTAuctionsData(); return; }
     const bMode    = baseMode(mode);
     const overlay  = isOverlayMode();
     const yest     = yesterdayStr();
@@ -418,14 +465,26 @@ async function fetchData() {
 function updateControlsVisibility() {
     const mode = modeSelect.value;
     const isCod = mode === 'cod';
+    const isUSTAuctions = mode === 'ust-auctions';
     const overlay = mode === 'country-overlay-hist' || mode === 'tenor-overlay-hist';
     document.getElementById('ctrl-from').classList.toggle('hidden', isCod);
     document.getElementById('ctrl-to').classList.toggle('hidden', isCod);
     document.getElementById('chart').style.display = isCod ? 'none' : '';
+    document.getElementById('chart-card').classList.toggle('hidden', isUSTAuctions);
     document.getElementById('cod-container').classList.toggle('hidden', !isCod);
-    document.getElementById('yield-table-container').classList.toggle('hidden', isCod);
+    document.getElementById('yield-table-container').classList.toggle('hidden', isCod || isUSTAuctions);
+    document.getElementById('ust-auctions-container').classList.toggle('hidden', !isUSTAuctions);
+    document.getElementById('ctrl-ust-date-fields').classList.toggle('hidden', !isUSTAuctions);
+    document.getElementById('ctrl-tenors').classList.toggle('hidden', isUSTAuctions);
+    document.getElementById('country-wrapper').classList.toggle('hidden', isUSTAuctions);
     document.getElementById('table-note').classList.toggle('hidden', true);
     document.getElementById('chart-card-label').textContent = isCod ? 'Live Change on Day' : 'Yield Curve';
+
+    // Reset dates to today when entering UST Auctions mode
+    if (isUSTAuctions) {
+        startDateInput.value = todayStr();
+        endDateInput.value = todayStr();
+    }
 
     // Toggle between single-select (radio) and multi-select (checkbox) country picker
     document.getElementById('country-single').classList.toggle('hidden', overlay);
@@ -576,6 +635,89 @@ function updateCoDTable(codData) {
     </table>
   </div>
 </div>`;
+}
+
+// ── UST Auctions ──────────────────────────────────────────────────
+function getCheckedDateFields() {
+    return Array.from(document.querySelectorAll('#ust-date-field-checkboxes input:checked')).map(cb => cb.value);
+}
+
+function toTreasuryDateFormat(isoDate) {
+    if (!isoDate) return '';
+    const [y, m, d] = isoDate.split('-');
+    return `${m}/${d}/${y}`;
+}
+
+function formatTreasuryDate(dateStr) {
+    if (!dateStr) return '-';
+    return dateStr.split('T')[0];
+}
+
+async function fetchUSTAuctionsData() {
+    const checkedFields = getCheckedDateFields();
+    if (!checkedFields.length) {
+        updateUSTAuctionsTable([]);
+        return;
+    }
+    const startDate = startDateInput.value || todayStr();
+    const endDate   = endDateInput.value   || todayStr();
+    const startFmt  = toTreasuryDateFormat(startDate);
+    const endFmt    = toTreasuryDateFormat(endDate);
+    const byField = {};
+    try {
+        for (const field of checkedFields) {
+            const url = `${API_BASE}/ust-auctions?startDate=${startFmt}&endDate=${endFmt}&dateFieldName=${field}`;
+            const cached = responseCache.get(url);
+            const cacheValid = cached !== undefined && (Date.now() - cached.ts) < CACHE_TTL_TODAY_MS;
+            const data = cacheValid
+                ? cached.data
+                : await fetch(url).then(r => { if(!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); });
+            if (!cacheValid) responseCache.set(url, { data, ts: Date.now() });
+            if (Array.isArray(data)) byField[field] = data;
+        }
+    } catch(err) {
+        showError(`Failed to fetch UST auction data: ${err.message}`);
+        return;
+    }
+    // Merge results, deduplicate by CUSIP
+    const seen = new Map();
+    for (const field of checkedFields) {
+        (byField[field] || []).forEach(item => {
+            if (!seen.has(item.cusip)) seen.set(item.cusip, item);
+        });
+    }
+    const securities = Array.from(seen.values());
+    securities.sort((a, b) => {
+        const da = a.auctionDate || a.announcementDate || '';
+        const db = b.auctionDate || b.announcementDate || '';
+        return db.localeCompare(da);
+    });
+    clearError();
+    updateUSTAuctionsTable(securities);
+}
+
+function updateUSTAuctionsTable(securities) {
+    const td  = 'px-4 py-2.5 text-sm text-gray-700 dark:text-slate-300';
+    const tdr = 'px-4 py-2.5 text-sm text-right font-mono text-gray-900 dark:text-slate-100';
+    if (!securities.length) {
+        document.getElementById('ust-auctions-body').innerHTML =
+            `<tr><td colspan="11" class="px-4 py-6 text-center text-sm text-gray-400 dark:text-slate-500">No results</td></tr>`;
+        return;
+    }
+    const rows = securities.map(s => `<tr>
+        <td class="${td}">${s.securityType || '-'}</td>
+        <td class="${td}">${s.securityTerm || '-'}</td>
+        <td class="${td}">${s.interestPaymentFrequency || '-'}</td>
+        <td class="${td} font-mono text-xs">${s.cusip || '-'}</td>
+        <td class="${tdr}">${s.bidToCoverRatio != null && s.bidToCoverRatio !== '' ? s.bidToCoverRatio : '-'}</td>
+        <td class="${td}">${s.reopening || '-'}</td>
+        <td class="${td}">${s.originalSecurityTerm || '-'}</td>
+        <td class="${td}">${formatTreasuryDate(s.announcementDate)}</td>
+        <td class="${td}">${formatTreasuryDate(s.auctionDate)}</td>
+        <td class="${td}">${formatTreasuryDate(s.issueDate)}</td>
+        <td class="${td}">${formatTreasuryDate(s.maturityDate)}</td>
+    </tr>`);
+    document.getElementById('ust-auctions-body').innerHTML = rows.join('');
 }
 
 // ── Error helpers ─────────────────────────────────────────────────
@@ -851,6 +993,10 @@ tenorCheckboxes.forEach(cb => {
 
   })
 })
+
+document.querySelectorAll('#ust-date-field-checkboxes input').forEach(cb => {
+    cb.addEventListener('change', fetchData);
+});
 
 document.getElementById('toggle-theme').addEventListener('click', () => {
     document.documentElement.classList.toggle('dark');
