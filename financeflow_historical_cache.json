@@ -31,6 +31,44 @@
       }
     }
   },
+  "united_states": {
+    "2026-03-17": {
+      "2Y": {
+        "value": 3.68,
+        "source": "FinanceFlow Cache"
+      },
+      "5Y": {
+        "value": 3.79,
+        "source": "FinanceFlow Cache"
+      },
+      "10Y": {
+        "value": 4.2,
+        "source": "FinanceFlow Cache"
+      },
+      "30Y": {
+        "value": 4.85,
+        "source": "FinanceFlow Cache"
+      }
+    },
+    "2026-03-18": {
+      "2Y": {
+        "value": 3.78,
+        "source": "FinanceFlow Cache"
+      },
+      "5Y": {
+        "value": 3.88,
+        "source": "FinanceFlow Cache"
+      },
+      "10Y": {
+        "value": 4.265,
+        "source": "FinanceFlow Cache"
+      },
+      "30Y": {
+        "value": 4.89,
+        "source": "FinanceFlow Cache"
+      }
+    }
+  },
   "germany": {
     "2026-03-18": {
       "2Y": {

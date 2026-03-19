@@ -2,6 +2,7 @@ from contextlib import asynccontextmanager
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import partial
 from fastapi import FastAPI, Query
+from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 import requests
@@ -326,6 +327,23 @@ def debug_financeflow_eod():
             _fetch_and_store_financeflow_eod_country(country)
     threading.Thread(target=_run_all, daemon=True).start()
     return {"status": "triggered", "message": "FinanceFlow EOD fetch started in background for all countries"}
+
+
+class FinanceFlowCachePatch(BaseModel):
+    country: str
+    date: str
+    tenors: dict  # e.g. {"2Y": 3.78, "5Y": 3.88, "10Y": 4.265, "30Y": 4.89}
+
+@app.post("/debug/financeflow-cache-patch")
+def debug_financeflow_cache_patch(patch: FinanceFlowCachePatch):
+    """Manually inject tenor values into the FinanceFlow historical cache (writes to volume)."""
+    for tenor, value in patch.tenors.items():
+        FINANCEFLOW_HISTORICAL_CACHE.setdefault(patch.country, {}).setdefault(patch.date, {})[tenor] = {
+            "value": value,
+            "source": "FinanceFlow Cache",
+        }
+    _save_financeflow_historical_cache(FINANCEFLOW_HISTORICAL_CACHE)
+    return {"status": "ok", "country": patch.country, "date": patch.date, "tenors": patch.tenors}
 
 
 # ---------------- helpers ----------------
