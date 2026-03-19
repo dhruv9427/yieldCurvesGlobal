@@ -346,6 +346,23 @@ def debug_financeflow_cache_patch(patch: FinanceFlowCachePatch):
     return {"status": "ok", "country": patch.country, "date": patch.date, "tenors": patch.tenors}
 
 
+@app.get("/debug/patch-us-march-2026")
+def debug_patch_us_march_2026():
+    """One-off: inject missing US yield data for 2026-03-17 and 2026-03-18."""
+    entries = {
+        "2026-03-17": {"2Y": 3.68, "5Y": 3.79, "10Y": 4.2, "30Y": 4.85},
+        "2026-03-18": {"2Y": 3.78, "5Y": 3.88, "10Y": 4.265, "30Y": 4.89},
+    }
+    for date, tenors in entries.items():
+        for tenor, value in tenors.items():
+            FINANCEFLOW_HISTORICAL_CACHE.setdefault("united_states", {}).setdefault(date, {})[tenor] = {
+                "value": value,
+                "source": "FinanceFlow Cache",
+            }
+    _save_financeflow_historical_cache(FINANCEFLOW_HISTORICAL_CACHE)
+    return {"status": "ok", "patched": entries}
+
+
 # ---------------- helpers ----------------
 
 
