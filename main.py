@@ -18,6 +18,15 @@ def _prewarm():
     ensure_bloomberg_cached(ALL_COUNTRIES)
     for country in ALL_COUNTRIES:
         _populate_financeflow_api_cache(country)
+    # Mirror what the EOD scheduler does: if today's FinanceFlow historical data
+    # is missing (e.g. after a mid-day deploy), fetch and persist it now.
+    today_str = dt_date.today().isoformat()
+    for country in ALL_COUNTRIES:
+        if today_str not in FINANCEFLOW_HISTORICAL_CACHE.get(country, {}):
+            try:
+                _fetch_and_store_financeflow_eod_country(country)
+            except Exception as e:
+                print(f"_prewarm: FinanceFlow historical catch-up failed for {country}: {e}")
 
 
 @asynccontextmanager
@@ -69,9 +78,20 @@ _financeflow_api_cache_date = None    # Tracks which calendar date the FinanceFl
 _financeflow_last_refresh_time = {}   # {country: datetime} last refresh time, for intraday TTL
 FINANCEFLOW_RETRY_TTL_SECONDS = 1800  # refresh FinanceFlow data every 30 min intraday
 
-BBG_LAST_GOOD_CACHE_FILE = "bbg_last_good_cache.json" #if we dont have live scraped data lets display the last good result from bbg that we stored
-BBG_HISTORICAL_CACHE_FILE = "bbg_historical_cache.json" #store each days BBG live scraped data in a cache file so we can use it as a historical data repo display - clever isnt it? useful for uk, germany (us at least has FRED)
-FINANCEFLOW_HISTORICAL_CACHE_FILE = "financeflow_historical_cache.json" #store each days FinanceFlowAPI called data in a cache file so we can use it as a historical data repo display for us, uk, ger and fra! clever isnt it?
+_DATA_DIR = os.environ.get("CACHE_DIR", "/data")
+os.makedirs(_DATA_DIR, exist_ok=True)
+
+# On first deploy the volume is empty — seed from any JSON files baked into the image
+for _seed_file in ["bbg_last_good_cache.json", "bbg_historical_cache.json", "financeflow_historical_cache.json"]:
+    _dest = os.path.join(_DATA_DIR, _seed_file)
+    if not os.path.exists(_dest) and os.path.exists(_seed_file):
+        import shutil
+        shutil.copy2(_seed_file, _dest)
+        print(f"Seeded {_dest} from baked-in {_seed_file}")
+
+BBG_LAST_GOOD_CACHE_FILE = os.path.join(_DATA_DIR, "bbg_last_good_cache.json") #if we dont have live scraped data lets display the last good result from bbg that we stored
+BBG_HISTORICAL_CACHE_FILE = os.path.join(_DATA_DIR, "bbg_historical_cache.json") #store each days BBG live scraped data in a cache file so we can use it as a historical data repo display - clever isnt it? useful for uk, germany (us at least has FRED)
+FINANCEFLOW_HISTORICAL_CACHE_FILE = os.path.join(_DATA_DIR, "financeflow_historical_cache.json") #store each days FinanceFlowAPI called data in a cache file so we can use it as a historical data repo display for us, uk, ger and fra! clever isnt it?
 #there are debug endpoints below for us to validate that we received data
 
 def _load_bbg_last_good_cache():
@@ -276,6 +296,26 @@ def debug_status():
         "financeflow_eod": financeflow_eod,
         "today_api_cache_countries": list(TODAY_FINANCEFLOWAPI_CACHE.keys()),
     }
+
+
+@app.get("/debug/migrate-cache-to-volume")
+def debug_migrate_cache_to_volume():
+    """One-time migration: copy cache files from working directory into the persistent volume at _DATA_DIR."""
+    import shutil
+    results = {}
+    for fname in ["bbg_last_good_cache.json", "bbg_historical_cache.json", "financeflow_historical_cache.json"]:
+        src = fname  # working directory (old location)
+        dst = os.path.join(_DATA_DIR, fname)
+        if src == dst:
+            results[fname] = "skipped — source and destination are the same"
+        elif os.path.exists(src) and not os.path.exists(dst):
+            shutil.copy2(src, dst)
+            results[fname] = f"copied to {dst}"
+        elif os.path.exists(dst):
+            results[fname] = f"already exists at {dst}, not overwritten"
+        else:
+            results[fname] = "source file not found in working directory"
+    return results
 
 
 @app.get("/debug/financeflow-eod")

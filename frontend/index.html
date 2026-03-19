@@ -83,6 +83,8 @@
           <option value="tenor">Tenor</option>
           <option value="spread">Spread</option>
           <option value="cod">Live CoD</option>
+          <option value="country-overlay-hist">Country Overlay (Hist)</option>
+          <option value="tenor-overlay-hist">Tenor Overlay (Hist)</option>
         </select>
       </div>
 
@@ -99,11 +101,17 @@
         <!-- Dropdown overlay -->
         <div id="country-dropdown"
           class="absolute top-full left-0 mt-1.5 z-50 hidden bg-white dark:bg-navy-800 border border-gray-200 dark:border-navy-600 rounded-xl shadow-xl p-3 min-w-[160px]">
-          <div class="flex flex-col gap-2">
+          <div id="country-single" class="flex flex-col gap-2">
             <label class="pill-cb"><input type="radio" name="country" value="united_states"><span class="w-full">🇺🇸 US</span></label>
             <label class="pill-cb"><input type="radio" name="country" value="united_kingdom"><span class="w-full">🇬🇧 UK</span></label>
             <label class="pill-cb"><input type="radio" name="country" value="germany"><span class="w-full">🇩🇪 GER</span></label>
             <label class="pill-cb"><input type="radio" name="country" value="france"><span class="w-full">🇫🇷 FRA</span></label>
+          </div>
+          <div id="country-multi" class="flex flex-col gap-2 hidden">
+            <label class="pill-cb"><input type="checkbox" name="country-multi" value="united_states"><span class="w-full">🇺🇸 US</span></label>
+            <label class="pill-cb"><input type="checkbox" name="country-multi" value="united_kingdom"><span class="w-full">🇬🇧 UK</span></label>
+            <label class="pill-cb"><input type="checkbox" name="country-multi" value="germany"><span class="w-full">🇩🇪 GER</span></label>
+            <label class="pill-cb"><input type="checkbox" name="country-multi" value="france"><span class="w-full">🇫🇷 FRA</span></label>
           </div>
         </div>
       </div>
@@ -241,7 +249,18 @@ const CACHE_TTL_TODAY_MS      = 5  * 60 * 1000; // 5 min  — URL includes today
 const CACHE_TTL_HISTORICAL_MS = 60 * 60 * 1000; // 60 min — purely historical URL
 
 function getSelectedTenors()    { return Array.from(tenorCheckboxes).filter(cb => cb.checked).map(cb => cb.value); }
+function isOverlayMode() {
+    return modeSelect.value === 'country-overlay-hist' || modeSelect.value === 'tenor-overlay-hist';
+}
+function baseMode(mode) {
+    if (mode === 'country-overlay-hist') return 'country';
+    if (mode === 'tenor-overlay-hist') return 'tenor';
+    return mode;
+}
 function getSelectedCountries() {
+    if (isOverlayMode()) {
+        return Array.from(document.querySelectorAll('#country-multi input:checked')).map(cb => cb.value);
+    }
     const checked = document.querySelector('#country-dropdown input[name=country]:checked');
     return checked ? [checked.value] : [];
 }
@@ -287,6 +306,11 @@ countryCheckboxes.forEach(cb => {
     cb.addEventListener('change', () => { updateCountryBtnLabel(); fetchData(); });
 });
 
+const countryMultiCheckboxes = document.querySelectorAll('#country-multi input[name=country-multi]');
+countryMultiCheckboxes.forEach(cb => {
+    cb.addEventListener('change', () => { updateCountryBtnLabel(); fetchData(); });
+});
+
 // Default: US selected
 document.querySelector('#country-dropdown input[value="united_states"]').checked = true;
 updateCountryBtnLabel();
@@ -296,22 +320,23 @@ startDateInput.value = todayStr();
 endDateInput.value   = todayStr();
 
 function setTenorDefaults() {
+    const mode = modeSelect.value;
 
-    if(modeSelect.value === 'country'){
+    if(mode === 'country' || mode === 'country-overlay-hist'){
         tenorCheckboxes.forEach(cb => cb.checked = true);
     }
 
-    else if(modeSelect.value === 'tenor'){
+    else if(mode === 'tenor' || mode === 'tenor-overlay-hist'){
         tenorCheckboxes.forEach(cb => cb.checked = (cb.value === '10Y'));
     }
 
-    else if(modeSelect.value === 'spread'){
+    else if(mode === 'spread'){
         tenorCheckboxes.forEach(cb =>
             cb.checked = (cb.value === '2Y' || cb.value === '10Y')
         );
     }
 
-    else if(modeSelect.value === 'cod'){
+    else if(mode === 'cod'){
         tenorCheckboxes.forEach(cb =>
             cb.checked = (cb.value === '2Y' || cb.value === '5Y' || cb.value === '10Y' || cb.value === '30Y')
         );
@@ -326,11 +351,15 @@ modeSelect.addEventListener('change', () => { setTenorDefaults(); updateControls
 // ── Fetch ─────────────────────────────────────────────────────────
 async function fetchData() {
     const mode     = modeSelect.value;
-    const start    = startDateInput.value;
-    const end      = endDateInput.value;
+    const bMode    = baseMode(mode);
+    const overlay  = isOverlayMode();
+    const yest     = yesterdayStr();
+    // For overlay modes cap start/end to yesterday; today is not permitted
+    const start    = overlay && startDateInput.value > yest ? yest : startDateInput.value;
+    const end      = overlay && (endDateInput.value > yest || !endDateInput.value) ? yest : endDateInput.value;
     const selected = getSelectedCountries();
 
-    if(mode === 'cod') { await fetchCoDData(); return; }
+    if(bMode === 'cod') { await fetchCoDData(); return; }
 
     if(!selected.length) {
         clearError();
@@ -342,11 +371,13 @@ async function fetchData() {
     try {
         const sc = selected.join(',');
         let url = `${API_BASE}/yield-curve/all?selected_countries=${sc}&force_scrape=${forceBloomberg}`;
-        if(mode === 'country'){
-            url += `&start=${start||todayStr()}&end=${end||todayStr()}&view=country`;
+        if(bMode === 'country'){
+            const defaultDate = overlay ? yest : todayStr();
+            url += `&start=${start||defaultDate}&end=${end||defaultDate}&view=country`;
         } else {
             const s = start || (() => { const d = new Date(Date.now()-7*24*60*60*1000); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; })();
-            url += `&start=${s}&end=${end||todayStr()}`;
+            const defaultEnd = overlay ? yest : todayStr();
+            url += `&start=${s}&end=${end||defaultEnd}`;
         }
 
         const cached = responseCache.get(url);
@@ -375,9 +406,9 @@ async function fetchData() {
 }
 
         clearError();
-        lastChart = { data, mode, selectedCountries: selected };
-        updateChart(data, mode, selected);
-        updateTable(data, mode);
+        lastChart = { data, mode: bMode, selectedCountries: selected };
+        updateChart(data, bMode, selected);
+        updateTable(data, bMode);
     } catch(err) {
         showError(`Failed to fetch: ${err.message}. Is the server running? (uvicorn main:app)`);
     }
@@ -385,7 +416,9 @@ async function fetchData() {
 
 // ── Controls visibility ───────────────────────────────────────────
 function updateControlsVisibility() {
-    const isCod = modeSelect.value === 'cod';
+    const mode = modeSelect.value;
+    const isCod = mode === 'cod';
+    const overlay = mode === 'country-overlay-hist' || mode === 'tenor-overlay-hist';
     document.getElementById('ctrl-from').classList.toggle('hidden', isCod);
     document.getElementById('ctrl-to').classList.toggle('hidden', isCod);
     document.getElementById('chart').style.display = isCod ? 'none' : '';
@@ -393,6 +426,32 @@ function updateControlsVisibility() {
     document.getElementById('yield-table-container').classList.toggle('hidden', isCod);
     document.getElementById('table-note').classList.toggle('hidden', true);
     document.getElementById('chart-card-label').textContent = isCod ? 'Live Change on Day' : 'Yield Curve';
+
+    // Toggle between single-select (radio) and multi-select (checkbox) country picker
+    document.getElementById('country-single').classList.toggle('hidden', overlay);
+    document.getElementById('country-multi').classList.toggle('hidden', !overlay);
+    updateCountryBtnLabel();
+
+    // Date constraints for historical overlay modes — today is not allowed
+    const yest = yesterdayStr();
+    if (overlay) {
+        startDateInput.max = yest;
+        endDateInput.max = yest;
+        if (!endDateInput.value || endDateInput.value > yest) {
+            endDateInput.value = yest;
+        }
+        if (!startDateInput.value || startDateInput.value > yest) {
+            if (mode === 'country-overlay-hist') {
+                startDateInput.value = yest;
+            } else {
+                const d = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+                startDateInput.value = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+            }
+        }
+    } else {
+        startDateInput.removeAttribute('max');
+        endDateInput.removeAttribute('max');
+    }
 }
 
 // ── Live CoD fetch & render ───────────────────────────────────────
