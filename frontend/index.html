@@ -133,16 +133,16 @@
         </div>
       </div>
 
-      <!-- From / To (grouped so they stack on mobile) -->
-      <div class="flex flex-col gap-3 sm:flex-row sm:items-end sm:gap-5">
-        <div id="ctrl-from" class="flex flex-col gap-1.5">
-          <label class="text-xs font-semibold text-gray-400 dark:text-slate-500 uppercase tracking-wider">From</label>
-          <input type="date" id="start_date" class="w-full min-w-[140px] px-3 py-2 rounded-lg border border-gray-200 dark:border-navy-600 bg-gray-50 dark:bg-navy-900 text-gray-900 dark:text-slate-100 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-        </div>
-        <div id="ctrl-to" class="flex flex-col gap-1.5">
-          <label class="text-xs font-semibold text-gray-400 dark:text-slate-500 uppercase tracking-wider">To</label>
-          <input type="date" id="end_date" class="w-full min-w-[140px] px-3 py-2 rounded-lg border border-gray-200 dark:border-navy-600 bg-gray-50 dark:bg-navy-900 text-gray-900 dark:text-slate-100 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-        </div>
+      <!-- From -->
+      <div id="ctrl-from" class="flex flex-col gap-1.5 w-[148px] shrink-0">
+        <label class="text-xs font-semibold text-gray-400 dark:text-slate-500 uppercase tracking-wider">From</label>
+        <input type="date" id="start_date" class="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-navy-600 bg-gray-50 dark:bg-navy-900 text-gray-900 dark:text-slate-100 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+      </div>
+
+      <!-- To -->
+      <div id="ctrl-to" class="flex flex-col gap-1.5 w-[148px] shrink-0">
+        <label class="text-xs font-semibold text-gray-400 dark:text-slate-500 uppercase tracking-wider">To</label>
+        <input type="date" id="end_date" class="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-navy-600 bg-gray-50 dark:bg-navy-900 text-gray-900 dark:text-slate-100 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
       </div>
 
       <!-- Tenors -->
