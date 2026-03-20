@@ -416,13 +416,16 @@ def fetch_fred_us_historical(tenor, start=None, end=None):
 
 # ---------------- FinanceFlow ----------------
 
+FINANCEFLOW_TENOR_MAP = {"1Y": "12m"}
+
+
 def fetch_financeflow(country, tenor):
     url = "https://financeflowapi.com/api/v1/bonds-spot"
 
     params = {
         "api_key": FINANCEFLOW_API_KEY,
         "country": country,
-        "type": tenor.lower()
+        "type": FINANCEFLOW_TENOR_MAP.get(tenor, tenor.lower())
     }
 
     try:
