@@ -1048,7 +1048,7 @@ function updateTable(data, mode) {
     const mkrow = (date, country, tenor, val, source) => {
         const stale = source && source.includes('Last Received');
         const srcClass = stale
-            ? 'px-5 py-2.5 font-medium text-amber-500 dark:text-amber-400'
+            ? 'px-5 py-2.5 font-medium text-amber-500 dark:text-amber-400 whitespace-nowrap'
             : td;
         return `<tr>
     <td class="${td}">${date}</td>
