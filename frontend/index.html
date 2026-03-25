@@ -57,6 +57,10 @@
   html.dark #new-issues-table tbody tr:nth-child(even) { background-color: #0a1628; }
   #new-issues-table tbody tr:hover { background-color: #eff6ff; }
   html.dark #new-issues-table tbody tr:hover { background-color: #1a3358; }
+  #eco-indicators-table tbody tr:nth-child(even) { background-color: #f9fafb; }
+  html.dark #eco-indicators-table tbody tr:nth-child(even) { background-color: #0a1628; }
+  #eco-indicators-table tbody tr:hover { background-color: #eff6ff; }
+  html.dark #eco-indicators-table tbody tr:hover { background-color: #1a3358; }
 </style>
 </head>
 <body class="bg-gray-100 dark:bg-navy-900 text-gray-900 dark:text-slate-100 min-h-screen transition-colors duration-300">
@@ -95,6 +99,7 @@
           <option value="tenor-overlay-hist">Tenor Overlay (Hist)</option>
           <option value="ust-auctions">UST Auctions</option>
           <option value="new-issues-corps">New Issues (Corps)</option>
+          <option value="economic-indicators">Economic Indicators</option>
         </select>
       </div>
 
@@ -116,6 +121,11 @@
             <label class="pill-cb"><input type="radio" name="country" value="united_kingdom"><span class="w-full">🇬🇧 UK</span></label>
             <label class="pill-cb"><input type="radio" name="country" value="germany"><span class="w-full">🇩🇪 GER</span></label>
             <label class="pill-cb"><input type="radio" name="country" value="france"><span class="w-full">🇫🇷 FRA</span></label>
+            <label class="pill-cb eco-country-only hidden"><input type="radio" name="country" value="japan"><span class="w-full">🇯🇵 JPN</span></label>
+            <label class="pill-cb eco-country-only hidden"><input type="radio" name="country" value="china"><span class="w-full">🇨🇳 CHN</span></label>
+            <label class="pill-cb eco-country-only hidden"><input type="radio" name="country" value="india"><span class="w-full">🇮🇳 IND</span></label>
+            <label class="pill-cb eco-country-only hidden"><input type="radio" name="country" value="australia"><span class="w-full">🇦🇺 AUS</span></label>
+            <label class="pill-cb eco-country-only hidden"><input type="radio" name="country" value="brazil"><span class="w-full">🇧🇷 BRA</span></label>
           </div>
           <div id="country-multi" class="flex flex-col gap-2 hidden">
             <label class="pill-cb"><input type="checkbox" name="country-multi" value="united_states"><span class="w-full">🇺🇸 US</span></label>
@@ -294,13 +304,29 @@
     </div>
   </div>
 
+  <!-- Economic Indicators Table -->
+  <div id="eco-indicators-container" class="hidden">
+    <div class="flex items-center justify-between mb-3">
+      <div id="eco-indicators-status" class="text-sm text-gray-500 dark:text-slate-400"></div>
+      <button id="eco-indicators-fetch-btn"
+        class="px-3 py-1.5 rounded-lg border border-gray-200 dark:border-navy-600 bg-gray-50 dark:bg-navy-900 text-gray-700 dark:text-slate-300 text-xs font-semibold hover:bg-blue-50 dark:hover:bg-navy-700 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors">
+        Fetch
+      </button>
+    </div>
+    <div class="bg-white dark:bg-navy-800 rounded-2xl shadow-sm border border-gray-200 dark:border-navy-600 overflow-hidden">
+      <div id="eco-indicators-content" class="px-4 pt-3 pb-4">
+        <div class="text-sm text-gray-400 dark:text-slate-500 text-center py-6">Select a country and click Fetch to load data.</div>
+      </div>
+    </div>
+  </div>
+
 </div>
 
 <script>
 const API_BASE = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
     ? 'http://localhost:8000'
     : '';
-const COUNTRY_LABELS = {united_states:'US', united_kingdom:'UK', france:'FRA', germany:'GER'};
+const COUNTRY_LABELS = {united_states:'US', united_kingdom:'UK', france:'FRA', germany:'GER', japan:'JPN', china:'CHN', india:'IND', australia:'AUS', brazil:'BRA'};
 function countryLabel(c){ return COUNTRY_LABELS[c] || c; }
 
 const TENOR_ORDER = {
@@ -453,6 +479,7 @@ async function fetchData() {
     const mode     = modeSelect.value;
     if(mode === 'ust-auctions') { await fetchUSTAuctionsData(); return; }
     if(mode === 'new-issues-corps') { await fetchNewIssuesCorps(); return; }
+    if(mode === 'economic-indicators') { await fetchEconomicIndicators(); return; }
     const bMode    = baseMode(mode);
     const overlay  = isOverlayMode();
     const yest     = yesterdayStr();
@@ -522,20 +549,33 @@ function updateControlsVisibility() {
     const isCod = mode === 'cod';
     const isUSTAuctions = mode === 'ust-auctions';
     const isNewIssuesCorps = mode === 'new-issues-corps';
-    const hideChartCard = isUSTAuctions || isNewIssuesCorps;
-    const hideCountryTenor = isUSTAuctions || isNewIssuesCorps;
+    const isEcoIndicators = mode === 'economic-indicators';
+    const hideChartCard = isUSTAuctions || isNewIssuesCorps || isEcoIndicators;
+    const hideCountry = isUSTAuctions || isNewIssuesCorps;
+    const hideTenors = isUSTAuctions || isNewIssuesCorps || isEcoIndicators;
     const overlay = mode === 'country-overlay-hist' || mode === 'tenor-overlay-hist';
-    document.getElementById('ctrl-from').classList.toggle('hidden', isCod || isNewIssuesCorps);
-    document.getElementById('ctrl-to').classList.toggle('hidden', isCod || isNewIssuesCorps);
+    document.getElementById('ctrl-from').classList.toggle('hidden', isCod || isNewIssuesCorps || isEcoIndicators);
+    document.getElementById('ctrl-to').classList.toggle('hidden', isCod || isNewIssuesCorps || isEcoIndicators);
     document.getElementById('chart').style.display = isCod ? 'none' : '';
     document.getElementById('chart-card').classList.toggle('hidden', hideChartCard);
     document.getElementById('cod-container').classList.toggle('hidden', !isCod);
-    document.getElementById('yield-table-container').classList.toggle('hidden', isCod || isUSTAuctions || isNewIssuesCorps);
+    document.getElementById('yield-table-container').classList.toggle('hidden', isCod || isUSTAuctions || isNewIssuesCorps || isEcoIndicators);
     document.getElementById('ust-auctions-container').classList.toggle('hidden', !isUSTAuctions);
     document.getElementById('new-issues-corps-container').classList.toggle('hidden', !isNewIssuesCorps);
+    document.getElementById('eco-indicators-container').classList.toggle('hidden', !isEcoIndicators);
+    document.querySelectorAll('.eco-country-only').forEach(el => el.classList.toggle('hidden', !isEcoIndicators));
+    // If leaving eco mode while an eco-only country is selected, reset to US
+    if (!isEcoIndicators) {
+        const ecoOnlyValues = ['japan','china','india','australia','brazil'];
+        const sel = document.querySelector('#country-single input[name=country]:checked');
+        if (sel && ecoOnlyValues.includes(sel.value)) {
+            document.querySelector('#country-single input[value="united_states"]').checked = true;
+            updateCountryBtnLabel();
+        }
+    }
     document.getElementById('ctrl-ust-date-fields').classList.toggle('hidden', !isUSTAuctions);
-    document.getElementById('ctrl-tenors').classList.toggle('hidden', hideCountryTenor);
-    document.getElementById('country-wrapper').classList.toggle('hidden', hideCountryTenor);
+    document.getElementById('ctrl-tenors').classList.toggle('hidden', hideTenors);
+    document.getElementById('country-wrapper').classList.toggle('hidden', hideCountry);
     document.getElementById('table-note').classList.toggle('hidden', true);
     document.getElementById('chart-card-label').textContent = isCod ? 'Live Change on Day' : 'Yield Curve';
 
@@ -579,6 +619,10 @@ function updateControlsVisibility() {
         if (mode === 'tenor' || mode === 'spread') {
             endDateInput.value = todayStr();
             const d = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+            startDateInput.value = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+        } else if (mode === 'economic-indicators') {
+            endDateInput.value = todayStr();
+            const d = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
             startDateInput.value = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
         } else {
             // country, cod, ust-auctions, new-issues-corps
@@ -842,6 +886,121 @@ document.getElementById('new-issues-fetch-btn').addEventListener('click', async 
         fetchNewIssuesCorps();
     } catch(err) {
         showError(`Failed to trigger fetch: ${err.message}`);
+        btn.disabled = false;
+        btn.textContent = 'Fetch';
+    }
+});
+
+// ── Economic Indicators ───────────────────────────────────────────
+const ECO_INDICATOR_KEYS   = ['headline_cpi', 'core_cpi', 'manufacturing_pmi', 'services_pmi'];
+const ECO_INDICATOR_LABELS = {
+    headline_cpi:      'Headline CPI',
+    core_cpi:          'Core CPI',
+    manufacturing_pmi: 'Manufacturing PMI',
+    services_pmi:      'Services PMI',
+};
+
+async function fetchEconomicIndicators() {
+    const selected = getSelectedCountries();
+    if (!selected.length) {
+        document.getElementById('eco-indicators-status').textContent = '';
+        document.getElementById('eco-indicators-content').innerHTML =
+            '<div class="text-sm text-gray-400 dark:text-slate-500 text-center py-6">Select a country and click Fetch to load data.</div>';
+        return;
+    }
+    const country = selected[0];
+    try {
+        const resp = await fetch(`${API_BASE}/economic-indicators?country=${country}`);
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const json = await resp.json();
+        clearError();
+        if (json.status === 'empty') {
+            document.getElementById('eco-indicators-status').textContent = 'No data — click Fetch to load.';
+            document.getElementById('eco-indicators-content').innerHTML =
+                '<div class="text-sm text-gray-400 dark:text-slate-500 text-center py-6">No data. Click Fetch to retrieve from FinanceFlow.</div>';
+        } else {
+            document.getElementById('eco-indicators-status').textContent = `${countryLabel(country)} Economic Indicators`;
+            updateEcoIndicatorsTable(json.data, country);
+        }
+    } catch(err) {
+        showError(`Failed to fetch economic indicators: ${err.message}`);
+    }
+}
+
+function updateEcoIndicatorsTable(data, country) {
+    const thCls      = 'px-4 py-3 text-center text-xs font-semibold text-gray-500 dark:text-slate-400 uppercase tracking-wider whitespace-nowrap';
+    const tdCls      = 'px-4 py-3 text-center font-mono text-sm text-gray-900 dark:text-slate-100 whitespace-nowrap';
+    const tdLabelCls = 'px-4 py-3 text-left text-sm font-semibold text-gray-700 dark:text-slate-300 whitespace-nowrap';
+    const na         = '<span class="text-gray-400 dark:text-slate-500">N/A</span>';
+
+    const indicatorCells = ECO_INDICATOR_KEYS.map(k =>
+        `<td class="${thCls}">${ECO_INDICATOR_LABELS[k]}</td>`
+    ).join('');
+
+    const lastCells = ECO_INDICATOR_KEYS.map(k => {
+        const v = data[k]?.last;
+        return `<td class="${tdCls}">${v != null ? v : na}</td>`;
+    }).join('');
+
+    const prevCells = ECO_INDICATOR_KEYS.map(k => {
+        const v = data[k]?.previous;
+        return `<td class="${tdCls}">${v != null ? v : na}</td>`;
+    }).join('');
+
+    const sourceCells = ECO_INDICATOR_KEYS.map(k => {
+        const s = data[k]?.source || '—';
+        return `<td class="px-4 py-3 text-center text-xs text-gray-500 dark:text-slate-400 whitespace-nowrap">${s}</td>`;
+    }).join('');
+
+    document.getElementById('eco-indicators-content').innerHTML = `
+<h2 class="text-base font-semibold text-gray-700 dark:text-slate-200 mb-3">
+  Economic Indicators &mdash; ${countryLabel(country)}
+</h2>
+<div class="overflow-x-auto">
+  <table id="eco-indicators-table" class="w-full text-sm border-collapse">
+    <tbody class="divide-y divide-gray-100 dark:divide-navy-700">
+      <tr class="bg-gray-50 dark:bg-navy-900">
+        <td class="${tdLabelCls} text-gray-500 dark:text-slate-400 text-xs uppercase tracking-wider">Indicator</td>
+        ${indicatorCells}
+      </tr>
+      <tr>
+        <td class="${tdLabelCls}">Last</td>
+        ${lastCells}
+      </tr>
+      <tr class="bg-gray-50 dark:bg-navy-900/50">
+        <td class="${tdLabelCls} text-gray-500 dark:text-slate-400">Previous</td>
+        ${prevCells}
+      </tr>
+      <tr>
+        <td class="${tdLabelCls} text-gray-500 dark:text-slate-400">Source</td>
+        ${sourceCells}
+      </tr>
+    </tbody>
+  </table>
+</div>`;
+}
+
+document.getElementById('eco-indicators-fetch-btn').addEventListener('click', async () => {
+    const btn = document.getElementById('eco-indicators-fetch-btn');
+    const country = getSelectedCountries()[0];
+    if (!country) return;
+    btn.disabled = true;
+    btn.textContent = 'Fetching…';
+    document.getElementById('eco-indicators-status').textContent = 'Fetching from FinanceFlow…';
+    try {
+        const resp = await fetch(`${API_BASE}/economic-indicators/refresh?country=${country}`, { method: 'POST' });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const json = await resp.json();
+        clearError();
+        if (json.status === 'ok') {
+            document.getElementById('eco-indicators-status').textContent = `${countryLabel(country)} Economic Indicators`;
+            updateEcoIndicatorsTable(json.data, country);
+        } else {
+            document.getElementById('eco-indicators-status').textContent = 'No data returned from FinanceFlow.';
+        }
+    } catch(err) {
+        showError(`Failed to fetch economic indicators: ${err.message}`);
+    } finally {
         btn.disabled = false;
         btn.textContent = 'Fetch';
     }

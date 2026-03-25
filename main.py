@@ -87,7 +87,7 @@ _DATA_DIR = os.environ.get("CACHE_DIR", "/data")
 os.makedirs(_DATA_DIR, exist_ok=True)
 
 # On first deploy the volume is empty — seed from any JSON files baked into the image
-for _seed_file in ["bbg_last_good_cache.json", "bbg_historical_cache.json", "financeflow_historical_cache.json"]:
+for _seed_file in ["bbg_last_good_cache.json", "bbg_historical_cache.json", "financeflow_historical_cache.json", "eco_indicators_cache.json"]:
     _dest = os.path.join(_DATA_DIR, _seed_file)
     if not os.path.exists(_dest) and os.path.exists(_seed_file):
         import shutil
@@ -1317,3 +1317,102 @@ def refresh_new_issues_corps():
     if not _new_issues_lock.locked():
         threading.Thread(target=_fetch_new_issues_corps, daemon=True).start()
     return {"status": "loading"}
+
+
+# ────────────────────────────────────────────────────────────────
+# Economic Indicators
+# ────────────────────────────────────────────────────────────────
+
+ECO_INDICATORS_CACHE_FILE = os.path.join(_DATA_DIR, "eco_indicators_cache.json")
+
+ECO_INDICATOR_KEYS = ["headline_cpi", "core_cpi", "manufacturing_pmi", "services_pmi"]
+ECO_INDICATOR_API_NAMES = {
+    "headline_cpi":      "Inflation Rate",
+    "core_cpi":          "Core Inflation Rate",
+    "manufacturing_pmi": "Manufacturing PMI",
+    "services_pmi":      "Services PMI",
+}
+
+
+def _load_eco_indicators_cache():
+    if os.path.exists(ECO_INDICATORS_CACHE_FILE):
+        try:
+            with open(ECO_INDICATORS_CACHE_FILE) as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {}
+
+
+def _save_eco_indicators_cache(cache):
+    try:
+        with open(ECO_INDICATORS_CACHE_FILE, "w") as f:
+            json.dump(cache, f, indent=2)
+    except Exception:
+        pass
+
+
+ECO_INDICATORS_CACHE = _load_eco_indicators_cache()
+
+
+def _fetch_eco_indicators_for_country(country):
+    """Fetch all economic indicators for a country in one API call and extract the 4 we need."""
+    print(f"[eco-indicators] Fetching for {country}")
+    url = "https://financeflowapi.com/api/v1/world-indicators"
+    params = {"api_key": FINANCEFLOW_API_KEY, "country": country}
+    try:
+        r = requests.get(url, params=params, timeout=15).json()
+        data = r.get("data", [])
+        by_name = {d["indicator_name"]: d for d in data}
+        result = {}
+        for key, api_name in ECO_INDICATOR_API_NAMES.items():
+            entry = by_name.get(api_name)
+            if entry:
+                def _to_float(v):
+                    try:
+                        return float(v) if v is not None else None
+                    except (ValueError, TypeError):
+                        return None
+                result[key] = {
+                    "last":     _to_float(entry.get("last")),
+                    "previous": _to_float(entry.get("previous")),
+                    "source":   "FinanceFlow",
+                }
+        if result:
+            ECO_INDICATORS_CACHE[country] = result
+            # Persist entire cache to file always with "FinanceFlow Cache" source
+            # so that after a restart every country correctly shows the cached label,
+            # regardless of how many countries were fetched live in this session.
+            file_cache = {
+                c: {k: {**v, "source": "FinanceFlow Cache"} for k, v in indicators.items()}
+                for c, indicators in ECO_INDICATORS_CACHE.items()
+            }
+            _save_eco_indicators_cache(file_cache)
+        print(f"[eco-indicators] Done for {country}: {list(result.keys())}")
+        return result
+    except Exception as e:
+        print(f"[eco-indicators] Error for {country}: {e}")
+        return {}
+
+
+ECO_INDICATOR_COUNTRIES = ALL_COUNTRIES + ["japan", "china", "india", "australia", "brazil"]
+
+
+@app.get("/economic-indicators")
+def get_economic_indicators(country: str = Query("united_states")):
+    if country not in ECO_INDICATOR_COUNTRIES:
+        return {"error": f"Unknown country: {country}"}
+    cached = ECO_INDICATORS_CACHE.get(country)
+    if not cached:
+        return {"status": "empty", "country": country, "data": {}}
+    return {"status": "ok", "country": country, "data": cached}
+
+
+@app.post("/economic-indicators/refresh")
+def refresh_economic_indicators(country: str = Query("united_states")):
+    if country not in ECO_INDICATOR_COUNTRIES:
+        return {"error": f"Unknown country: {country}"}
+    result = _fetch_eco_indicators_for_country(country)
+    if not result:
+        return {"status": "empty", "country": country, "data": {}}
+    return {"status": "ok", "country": country, "data": result}
